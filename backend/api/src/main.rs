@@ -11,6 +11,8 @@ mod checklist;
 mod detector;
 mod error;
 mod handlers;
+mod multisig_handlers;
+mod multisig_routes;
 mod models;
 mod rate_limit;
 mod routes;
@@ -79,6 +81,7 @@ async fn main() -> Result<()> {
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
         .merge(routes::migration_routes())
+        .merge(multisig_routes::multisig_routes())
         .merge(audit_routes::audit_routes())
         .merge(benchmark_routes::benchmark_routes())
         .fallback(handlers::route_not_found)
