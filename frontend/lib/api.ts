@@ -1,4 +1,4 @@
-import { MOCK_CONTRACTS, MOCK_EXAMPLES, MOCK_VERSIONS } from './mock-data';
+import { MOCK_CONTRACTS, MOCK_EXAMPLES, MOCK_VERSIONS, MOCK_TEMPLATES } from './mock-data';
 
 export interface Contract {
   id: string;
@@ -75,15 +75,15 @@ export const api = {
       return new Promise((resolve) => {
         setTimeout(() => {
           let filtered = [...MOCK_CONTRACTS];
-          
+
           if (params?.query) {
             const q = params.query.toLowerCase();
-            filtered = filtered.filter(c => 
-              c.name.toLowerCase().includes(q) || 
+            filtered = filtered.filter(c =>
+              c.name.toLowerCase().includes(q) ||
               (c.description && c.description.toLowerCase().includes(q))
             );
           }
-          
+
           if (params?.category) {
             filtered = filtered.filter(c => c.category === params.category);
           }
@@ -99,7 +99,7 @@ export const api = {
             page_size: params?.page_size || 20,
             total_pages: 1
           });
-        }, 500); 
+        }, 500);
       });
     }
 
@@ -140,7 +140,7 @@ export const api = {
       return new Promise((resolve) => {
         setTimeout(() => {
           resolve(MOCK_EXAMPLES[id] || []);
-        }, 500); 
+        }, 500);
       });
     }
 
@@ -205,10 +205,10 @@ export const api = {
   async getPublisher(id: string): Promise<Publisher> {
     if (USE_MOCKS) {
       return Promise.resolve({
-          id: id,
-          stellar_address: 'G...',
-          username: 'Mock Publisher',
-          created_at: new Date().toISOString()
+        id: id,
+        stellar_address: 'G...',
+        username: 'Mock Publisher',
+        created_at: new Date().toISOString()
       });
     }
 
@@ -227,21 +227,56 @@ export const api = {
     return response.json();
   },
 
-  // Stats endpoint
   async getStats(): Promise<{ total_contracts: number; verified_contracts: number; total_publishers: number }> {
     if (USE_MOCKS) {
-       return Promise.resolve({
-           total_contracts: MOCK_CONTRACTS.length,
-           verified_contracts: MOCK_CONTRACTS.filter(c => c.is_verified).length,
-           total_publishers: 5
-       });
+      return Promise.resolve({
+        total_contracts: MOCK_CONTRACTS.length,
+        verified_contracts: MOCK_CONTRACTS.filter(c => c.is_verified).length,
+        total_publishers: 5
+      });
     }
 
     const response = await fetch(`${API_URL}/api/stats`);
     if (!response.ok) throw new Error('Failed to fetch stats');
     return response.json();
   },
+
+  async getTemplates(category?: string): Promise<Template[]> {
+    if (USE_MOCKS) {
+      return Promise.resolve(
+        category ? MOCK_TEMPLATES.filter(t => t.category === category) : MOCK_TEMPLATES
+      );
+    }
+    const url = category ? `${API_URL}/api/templates?category=${category}` : `${API_URL}/api/templates`;
+    const response = await fetch(url);
+    if (!response.ok) throw new Error('Failed to fetch templates');
+    return response.json();
+  },
+
+  async getTemplate(slug: string): Promise<Template> {
+    if (USE_MOCKS) {
+      const t = MOCK_TEMPLATES.find(t => t.slug === slug);
+      if (!t) throw new Error('Template not found');
+      return Promise.resolve(t);
+    }
+    const response = await fetch(`${API_URL}/api/templates/${slug}`);
+    if (!response.ok) throw new Error('Failed to fetch template');
+    return response.json();
+  },
 };
+
+export interface Template {
+  id: string;
+  slug: string;
+  name: string;
+  description?: string;
+  category: string;
+  version: string;
+  install_count: number;
+  parameters: { name: string; type: string; default?: string; description?: string }[];
+  created_at: string;
+}
+
 
 export interface ContractExample {
   id: string;

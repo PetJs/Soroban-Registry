@@ -3,22 +3,146 @@ mod config;
 mod export;
 mod import;
 mod manifest;
+mod patch;
+mod wizard;
 
-    /// Generate documentation from contract
+use anyhow::Result;
+use clap::{Parser, Subcommand};
+use config::Network;
+use patch::Severity;
+
+#[derive(Parser)]
+#[command(name = "soroban-registry", about = "Soroban Smart Contract Registry CLI", version)]
+struct Cli {
+    #[arg(long, env = "SOROBAN_REGISTRY_API_URL", default_value = "http://localhost:3001")]
+    api_url: String,
+
+    #[arg(long, env = "SOROBAN_NETWORK")]
+    network: Option<String>,
+
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Search {
+        query: String,
+        #[arg(long)]
+        verified_only: bool,
+    },
+    Info {
+        contract_id: String,
+    },
+    Publish {
+        #[arg(long)]
+        contract_id: String,
+        #[arg(long)]
+        name: String,
+        #[arg(long)]
+        description: Option<String>,
+        #[arg(long)]
+        category: Option<String>,
+        #[arg(long)]
+        tags: Option<String>,
+        #[arg(long)]
+        publisher: String,
+    },
+    List {
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+    Migrate {
+        #[arg(long)]
+        contract_id: String,
+        #[arg(long)]
+        wasm: String,
+        #[arg(long)]
+        simulate_fail: bool,
+        #[arg(long)]
+        dry_run: bool,
+    },
+    Export {
+        #[arg(long)]
+        id: String,
+        #[arg(long, default_value = "export.tar.gz")]
+        output: String,
+        #[arg(long, default_value = ".")]
+        contract_dir: String,
+    },
+    Import {
+        #[arg(long)]
+        archive: String,
+        #[arg(long, default_value = ".")]
+        output_dir: String,
+    },
     Doc {
-        /// Path to contract WASM file
         contract_path: String,
-
-        /// Output directory
         #[arg(long, default_value = "docs")]
         output: String,
     },
+    Wizard {},
+    History {
+        #[arg(long)]
+        search: Option<String>,
+        #[arg(long, default_value = "20")]
+        limit: usize,
+    },
+    Patch {
+        #[command(subcommand)]
+        action: PatchCommands,
+    },
+    Template {
+        #[command(subcommand)]
+        action: TemplateCommands,
+    },
 }
+
+#[derive(Subcommand)]
+enum PatchCommands {
+    Create {
+        #[arg(long)]
+        version: String,
+        #[arg(long)]
+        hash: String,
+        #[arg(long, default_value = "medium")]
+        severity: String,
+        #[arg(long, default_value = "100")]
+        rollout: u8,
+    },
+    Notify {
+        #[arg(long)]
+        patch_id: String,
+    },
+    Apply {
+        #[arg(long)]
+        contract_id: String,
+        #[arg(long)]
+        patch_id: String,
+    },
+}
+
+#[derive(Subcommand)]
+enum TemplateCommands {
+    List {
+        #[arg(long)]
+        category: Option<String>,
+    },
+    Clone {
+        template: String,
+        output_name: String,
+        #[arg(long)]
+        symbol: Option<String>,
+        #[arg(long)]
+        initial_supply: Option<String>,
+        #[arg(long)]
+        output_dir: Option<String>,
+    },
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let cli = Cli::parse();
-
-    // Resolve network configuration
     let network = config::resolve_network(cli.network)?;
 
     match cli.command {
@@ -28,14 +152,7 @@ async fn main() -> Result<()> {
         Commands::Info { contract_id } => {
             commands::info(&cli.api_url, &contract_id, network).await?;
         }
-        Commands::Publish {
-            contract_id,
-            name,
-            description,
-            category,
-            tags,
-            publisher,
-        } => {
+        Commands::Publish { contract_id, name, description, category, tags, publisher } => {
             let tags_vec = tags
                 .map(|t| t.split(',').map(|s| s.trim().to_string()).collect())
                 .unwrap_or_default();
@@ -54,12 +171,7 @@ async fn main() -> Result<()> {
         Commands::List { limit } => {
             commands::list(&cli.api_url, limit, network).await?;
         }
-        Commands::Migrate {
-            contract_id,
-            wasm,
-            simulate_fail,
-            dry_run,
-        } => {
+        Commands::Migrate { contract_id, wasm, simulate_fail, dry_run } => {
             commands::migrate(&cli.api_url, &contract_id, &wasm, simulate_fail, dry_run).await?;
         }
         Commands::Export { id, output, contract_dir } => {
@@ -89,7 +201,23 @@ async fn main() -> Result<()> {
                 commands::patch_apply(&cli.api_url, &contract_id, &patch_id).await?;
             }
         },
+        Commands::Template { action } => match action {
+            TemplateCommands::List { category } => {
+                commands::template_list(&cli.api_url, category.as_deref()).await?;
+            }
+            TemplateCommands::Clone { template, output_name, symbol, initial_supply, output_dir } => {
+                commands::template_clone(
+                    &cli.api_url,
+                    &template,
+                    &output_name,
+                    symbol.as_deref(),
+                    initial_supply.as_deref(),
+                    output_dir.as_deref(),
+                )
+                .await?;
+            }
+        },
     }
+
     Ok(())
-}
 }

@@ -15,6 +15,8 @@ mod rate_limit;
 mod routes;
 mod scoring;
 mod state;
+mod template_handlers;
+mod template_routes;
 
 use anyhow::Result;
 use axum::http::{header, HeaderValue, Method};
@@ -81,6 +83,7 @@ async fn main() -> Result<()> {
         .merge(audit_routes::security_audit_routes())
         .merge(benchmark_routes::benchmark_routes())
         .merge(contract_history_routes::contract_history_routes())
+        .merge(template_routes::template_routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_logger))
         .layer(middleware::from_fn_with_state(

@@ -503,3 +503,112 @@ pub async fn patch_apply(
 
     Ok(())
 }
+
+pub async fn template_list(api_url: &str, category: Option<&str>) -> Result<()> {
+    let client = reqwest::Client::new();
+    let mut url = format!("{}/api/templates", api_url);
+    if let Some(cat) = category {
+        url.push_str(&format!("?category={}", cat));
+    }
+
+    let response = client.get(&url).send().await.context("Failed to fetch templates")?;
+    if !response.status().is_success() {
+        anyhow::bail!("API error: {}", response.text().await?);
+    }
+
+    let templates: serde_json::Value = response.json().await?;
+    let items = templates.as_array().context("Invalid response")?;
+
+    println!("\n{}", "Available Templates:".bold().cyan());
+    println!("{}", "=".repeat(80).cyan());
+
+    if items.is_empty() {
+        println!("{}", "No templates found.".yellow());
+        return Ok(());
+    }
+
+    for t in items {
+        let name = t["name"].as_str().unwrap_or("Unknown");
+        let slug = t["slug"].as_str().unwrap_or("");
+        let category = t["category"].as_str().unwrap_or("");
+        let version = t["version"].as_str().unwrap_or("1.0.0");
+        let installs = t["install_count"].as_i64().unwrap_or(0);
+        let desc = t["description"].as_str().unwrap_or("");
+
+        println!("\n{} {} {}", "●".green(), name.bold(), format!("v{}", version).bright_black());
+        println!("  slug: {} | category: {} | installs: {}", slug.bright_blue(), category.bright_magenta(), installs);
+        if !desc.is_empty() {
+            println!("  {}", desc.bright_black());
+        }
+        println!("  Clone: soroban-registry template clone {} my-{}", slug, slug);
+    }
+
+    println!("\n{}", "=".repeat(80).cyan());
+    println!("Found {} template(s)\n", items.len());
+
+    Ok(())
+}
+
+pub async fn template_clone(
+    api_url: &str,
+    template: &str,
+    output_name: &str,
+    symbol: Option<&str>,
+    initial_supply: Option<&str>,
+    output_dir: Option<&str>,
+) -> Result<()> {
+    let client = reqwest::Client::new();
+    let url = format!("{}/api/templates/{}/clone", api_url, template);
+
+    let mut params = serde_json::Map::new();
+    if let Some(sym) = symbol {
+        params.insert("SYMBOL".into(), serde_json::Value::String(sym.to_string()));
+    }
+    if let Some(supply) = initial_supply {
+        params.insert("INITIAL_SUPPLY".into(), serde_json::Value::String(supply.to_string()));
+    }
+
+    let payload = json!({
+        "name": output_name,
+        "parameters": params,
+    });
+
+    println!("\n{}", "Cloning template...".bold().cyan());
+
+    let response = client
+        .post(&url)
+        .json(&payload)
+        .send()
+        .await
+        .context("Failed to clone template")?;
+
+    if !response.status().is_success() {
+        anyhow::bail!("Failed to clone template: {}", response.text().await?);
+    }
+
+    let result: serde_json::Value = response.json().await?;
+    let source = result["source_code"].as_str().unwrap_or("");
+    let version = result["version"].as_str().unwrap_or("1.0.0");
+
+    let dir = output_dir.unwrap_or(".");
+    fs::create_dir_all(dir).context("Failed to create output directory")?;
+
+    let snake_name: String = output_name
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect();
+    let file_path = format!("{}/{}.rs", dir, snake_name);
+    fs::write(&file_path, source).context("Failed to write contract source")?;
+
+    println!("{}", "✓ Template cloned successfully!".green().bold());
+    println!("  {}: {}", "Template".bold(), template.bright_blue());
+    println!("  {}: {}", "Contract".bold(), output_name.bold());
+    println!("  {}: {}", "Version".bold(), version);
+    println!("  {}: {}", "Output".bold(), file_path.bright_black());
+    println!("\n  {} Next steps:", "→".bright_black());
+    println!("    1. Review and customise {}", file_path);
+    println!("    2. cargo build --target wasm32-unknown-unknown --release");
+    println!("    3. soroban-registry publish --contract-id <ID> --name \"{}\" --publisher <ADDR>\n", output_name);
+
+    Ok(())
+}
