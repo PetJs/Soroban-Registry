@@ -31,7 +31,10 @@ impl FromStr for Network {
             "mainnet" => Ok(Network::Mainnet),
             "testnet" => Ok(Network::Testnet),
             "futurenet" => Ok(Network::Futurenet),
-            _ => anyhow::bail!("Invalid network: {}. Allowed values: mainnet, testnet, futurenet", s),
+            _ => anyhow::bail!(
+                "Invalid network: {}. Allowed values: mainnet, testnet, futurenet",
+                s
+            ),
         }
     }
 }
@@ -52,9 +55,9 @@ pub fn resolve_network(cli_flag: Option<String>) -> Result<Network> {
         if config_path.exists() {
             let content = fs::read_to_string(&config_path)
                 .with_context(|| format!("Failed to read config file at {:?}", config_path))?;
-            
-            let config: ConfigFile = toml::from_str(&content)
-                .with_context(|| "Failed to parse config file")?;
+
+            let config: ConfigFile =
+                toml::from_str(&content).with_context(|| "Failed to parse config file")?;
 
             if let Some(net_str) = config.network {
                 return net_str.parse::<Network>();
@@ -63,7 +66,7 @@ pub fn resolve_network(cli_flag: Option<String>) -> Result<Network> {
     }
 
     // 3. Default
-    Ok(Network::Testnet)
+    Ok(Network::Mainnet)
 }
 
 fn config_file_path() -> Option<PathBuf> {
