@@ -5,29 +5,22 @@ mod handlers;
 mod batch_verify_handlers;
 mod aggregation;
 mod error;
-mod handlers;
 mod rate_limit;
-mod routes;
 mod state;
 mod validation;
-// mod auth;
-// mod auth_handlers;
 mod cache;
 mod metrics;
 mod metrics_handler;
-// mod resource_handlers;
-// mod resource_tracking;
 mod analytics;
 mod breaking_changes;
 mod custom_metrics_handlers;
 mod dependency;
 mod deprecation_handlers;
 pub mod health_monitor;
-mod deprecation_handlers;
-pub mod health_monitor;
 pub mod request_tracing;
 pub mod signing_handlers;
 mod type_safety;
+mod openapi;
 
 use anyhow::Result;
 use axum::http::{header, HeaderValue, Method};
@@ -76,9 +69,19 @@ async fn main() -> Result<()> {
         tracing::error!("Failed to register metrics: {}", e);
     }
 
+    // Initialize Job Engine
+    let (job_engine, job_rx) = soroban_batch::engine::JobEngine::new();
+    let job_engine = Arc::new(job_engine);
+    let job_engine_worker = job_engine.clone();
+    
+    // Spawn background worker
+    tokio::spawn(async move {
+        job_engine_worker.run_worker(job_rx).await;
+    });
+
     // Create app state
     let is_shutting_down = Arc::new(AtomicBool::new(false));
-    let state = AppState::new(pool.clone(), registry, is_shutting_down.clone());
+    let state = AppState::new(pool.clone(), registry, job_engine, is_shutting_down.clone());
     let rate_limit_state = RateLimitState::from_env();
 
     let cors = CorsLayer::new()
@@ -95,6 +98,7 @@ async fn main() -> Result<()> {
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
         .merge(routes::migration_routes())
+        .merge(routes::openapi_routes())
         .fallback(handlers::route_not_found)
         .layer(middleware::from_fn(request_tracing::tracing_middleware))
         .layer(middleware::from_fn_with_state(

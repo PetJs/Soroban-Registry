@@ -1,12 +1,9 @@
-use axum::{
-    routing::{get, patch, post},
-    Router,
-};
-
 use crate::{
     breaking_changes, custom_metrics_handlers, deprecation_handlers, handlers, metrics_handler,
-    state::AppState,
+    openapi::ApiDoc, state::AppState,
 };
+use utoipa::OpenApi;
+use utoipa_swagger_ui::SwaggerUi;
 
 pub fn observability_routes() -> Router<AppState> {
     Router::new().route("/metrics", get(metrics_handler::metrics_endpoint))
@@ -68,45 +65,9 @@ pub fn contract_routes() -> Router<AppState> {
             post(handlers::post_contract_interactions_batch),
         )
         .route(
-            "/api/contracts/:id/deprecation-info",
-            get(deprecation_handlers::get_deprecation_info),
-        )
-        .route(
-            "/api/contracts/:id/deprecate",
-            post(deprecation_handlers::deprecate_contract),
-        )
-        .route(
-            "/api/contracts/:id/state/:key",
-            get(handlers::get_contract_state).post(handlers::update_contract_state),
-        )
-        .route(
-            "/api/contracts/:id/analytics",
-            get(handlers::get_contract_analytics),
-        )
-        .route(
-            "/api/contracts/:id/trust-score",
-            get(handlers::get_trust_score),
-        )
-        .route(
-            "/api/contracts/:id/dependencies",
-            get(handlers::get_contract_dependencies),
-        )
-        .route(
-            "/api/contracts/:id/dependents",
-            get(handlers::get_contract_dependents),
-        )
-        .route(
             "/api/contracts/:id/impact",
             get(handlers::get_impact_analysis),
         )
-        .route("/api/contracts/:id/deprecation-info", get(deprecation_handlers::get_deprecation_info))
-        .route("/api/contracts/:id/deprecate", post(deprecation_handlers::deprecate_contract))
-        .route("/api/contracts/:id/state/:key", get(handlers::get_contract_state).post(handlers::update_contract_state))
-        .route("/api/contracts/:id/analytics", get(handlers::get_contract_analytics))
-        .route("/api/contracts/:id/trust-score", get(handlers::get_trust_score))
-        .route("/api/contracts/:id/dependencies", get(handlers::get_contract_dependencies))
-        .route("/api/contracts/:id/dependents", get(handlers::get_contract_dependents))
-        .route("/api/contracts/:id/impact", get(handlers::get_impact_analysis))
         .route("/api/contracts/verify", post(handlers::verify_contract))
         .route("/api/admin/audit-logs", get(handlers::get_all_audit_logs))
         .route(
@@ -143,6 +104,11 @@ pub fn contract_routes() -> Router<AppState> {
     // TODO: backup_routes, notification_routes, and post_incident_routes
     // are available in the api library crate but need architectural refactoring
     // to be integrated with the main AppState
+}
+
+pub fn openapi_routes() -> Router<AppState> {
+    Router::new()
+        .merge(SwaggerUi::new("/swagger-ui").url("/api-docs/openapi.json", ApiDoc::openapi()))
 }
 
 pub fn publisher_routes() -> Router<AppState> {
