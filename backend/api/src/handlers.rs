@@ -436,6 +436,7 @@ pub async fn get_stats(State(state): State<AppState>) -> ApiResult<Json<Value>> 
 )]
 pub async fn list_contracts(
     State(state): State<AppState>,
+    claims: Option<shared::AuthClaims>,
     params: Result<Query<ContractSearchParams>, QueryRejection>,
 ) -> axum::response::Response {
     let Query(params) = match params {
@@ -525,10 +526,21 @@ pub async fn list_contracts(
         LOG(1 + cs.user_interaction_count) as personal_boost
     FROM contracts c
     JOIN contract_stats cs ON c.id = cs.id
-    WHERE 1=1"
+    WHERE (c.visibility = 'public'"
     ));
 
-    let mut count_query = String::from("SELECT COUNT(*) FROM contracts c WHERE 1=1");
+    let mut count_query = String::from("SELECT COUNT(*) FROM contracts c WHERE (c.visibility = 'public'");
+
+    if let Some(claims) = claims {
+        let visibility_clause = format!(
+            " OR (c.visibility = 'private' AND c.organization_id IN (SELECT organization_id FROM organization_members om JOIN publishers p ON om.publisher_id = p.id WHERE p.stellar_address = '{}'))",
+            claims.sub.replace('\'', "''")
+        );
+        query.push_str(&visibility_clause);
+        count_query.push_str(&visibility_clause);
+    }
+    query.push_str(")");
+    count_query.push_str(")");
 
     if let Some(ref q) = params.query {
         let cleaned_q = q.replace('\'', "''");
@@ -672,6 +684,7 @@ pub async fn list_contracts(
 )]
 pub async fn get_contract(
     State(state): State<AppState>,
+    claims: Option<shared::AuthClaims>,
     Path(id): Path<String>,
     Query(query): Query<GetContractQuery>,
 ) -> ApiResult<Json<ContractGetResponse>> {
@@ -693,6 +706,28 @@ pub async fn get_contract(
             ),
             _ => db_internal_error("get contract by id", err),
         })?;
+
+    // Visibility check
+    if contract.visibility == shared::VisibilityType::Private {
+        let is_member = if let Some(ref claims) = claims {
+            if let Some(org_id) = contract.organization_id {
+                crate::org_handlers::check_org_role(&state.pool, org_id, &claims.sub, shared::OrganizationRole::Viewer)
+                    .await
+                    .is_ok()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !is_member {
+            return Err(ApiError::forbidden(
+                "AccessDenied",
+                "This contract is private and you do not have access to it",
+            ));
+        }
+    }
 
     let current_network = query.network;
     let network_config = if let Some(ref net) = current_network {

@@ -19,6 +19,7 @@ mod dependency;
 mod deprecation_handlers;
 mod error;
 mod handlers;
+mod org_handlers;
 mod health;
 pub mod health_monitor;
 #[cfg(test)]
@@ -208,6 +209,7 @@ async fn main() -> Result<()> {
     // Build router
     let app = Router::new()
         .merge(routes::auth_routes())
+        .merge(routes::organization_routes())
         .merge(routes::contract_routes())
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())

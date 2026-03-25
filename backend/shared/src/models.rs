@@ -36,6 +36,24 @@ pub struct Contract {
     /// Search relevance score (calculated at runtime)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relevance_score: Option<f64>,
+    /// Organization that owns this contract (for private registries)
+    pub organization_id: Option<Uuid>,
+    /// Visibility level
+    pub visibility: VisibilityType,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
+#[sqlx(type_name = "visibility_type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum VisibilityType {
+    Public,
+    Private,
+}
+
+impl Default for VisibilityType {
+    fn default() -> Self {
+        Self::Public
+    }
 }
 
 /// Response for GET /contracts/:id with optional network-specific slice (Issue #43)
@@ -115,6 +133,74 @@ pub struct ContractVersion {
     /// Signature algorithm identifier (e.g. "ed25519")
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub signature_algorithm: Option<String>,
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-TENANCY TYPES (Issue #420)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
+#[sqlx(type_name = "organization_role", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum OrganizationRole {
+    Admin,
+    Member,
+    Viewer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct Organization {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub is_private: bool,
+    pub quota_contracts: i32,
+    pub rate_limit_requests: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct OrganizationMember {
+    pub organization_id: Uuid,
+    pub publisher_id: Uuid,
+    pub role: OrganizationRole,
+    pub joined_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct OrganizationInvitation {
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    pub email: String,
+    pub role: OrganizationRole,
+    pub token: String,
+    pub inviter_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub accepted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateOrganizationRequest {
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub is_private: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct InviteMemberRequest {
+    pub email: String,
+    pub role: OrganizationRole,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateOrganizationRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub is_private: Option<bool>,
 }
 
 /// Verification status and details

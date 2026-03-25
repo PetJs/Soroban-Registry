@@ -3,7 +3,7 @@ use crate::openapi;
 use crate::{
     ab_test_handlers, auth, auth_handlers, batch_verify_handlers, breaking_changes,
     canary_handlers, compatibility_testing_handlers, custom_metrics_handlers, deprecation_handlers,
-    handlers, metrics_handler, migration_handlers, performance_handlers, resource_handlers,
+    handlers, metrics_handler, migration_handlers, org_handlers, performance_handlers, resource_handlers,
     simulation_handlers, state::AppState,
 };
 use axum::{
@@ -183,6 +183,27 @@ pub fn contract_routes() -> Router<AppState> {
         .route(
             "/api/contracts/simulate-deploy",
             post(simulation_handlers::simulate_deploy),
+        )
+}
+
+pub fn organization_routes() -> Router<AppState> {
+    Router::new()
+        .route("/api/organizations", post(org_handlers::create_organization))
+        .route(
+            "/api/organizations/:id",
+            get(org_handlers::get_organization).patch(org_handlers::update_organization),
+        )
+        .route(
+            "/api/organizations/:id/members",
+            get(org_handlers::list_org_members),
+        )
+        .route(
+            "/api/organizations/:id/invitations",
+            post(org_handlers::invite_member),
+        )
+        .route(
+            "/api/organizations/invitations/:token/accept",
+            post(org_handlers::accept_invitation),
         )
 }
 
