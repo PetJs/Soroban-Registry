@@ -52,6 +52,8 @@ const DEFAULT_WRITE_LIMIT_PER_MINUTE: u32 = 20;
 const DEFAULT_AUTH_LIMIT_PER_MINUTE: u32 = 1_000;
 const DEFAULT_HEALTH_LIMIT_PER_MINUTE: u32 = 10_000;
 const DEFAULT_WINDOW_SECONDS: u64 = 60;
+const DEFAULT_CONTRACTS_PAGE_SIZE: u32 = 50;
+const MAX_CONTRACTS_PAGE_SIZE: u32 = 1000;
 const ENDPOINT_LIMIT_ENV_PREFIX: &str = "RATE_LIMIT_ENDPOINT_";
 
 /// How often the background task sweeps for expired buckets.
@@ -179,23 +181,24 @@ impl RateLimitState {
             .unwrap_or_else(|| request.uri().path());
         let endpoint_key = endpoint_key(method, matched_path);
 
-        if let Some(limit) = self.config.endpoint_limits.get(&endpoint_key) {
-            return (*limit, endpoint_key);
-        }
+        let base_limit = if let Some(limit) = self.config.endpoint_limits.get(&endpoint_key) {
+            *limit
+        } else if matched_path == "/health" || method == Method::OPTIONS {
+            self.config.health_limit
+        } else if request.headers().contains_key(AUTHORIZATION) {
+            self.config.auth_limit
+        } else if is_write_method(method) {
+            self.config.write_limit
+        } else {
+            self.config.read_limit
+        };
 
-        if matched_path == "/health" || method == Method::OPTIONS {
-            return (self.config.health_limit, endpoint_key);
-        }
+        let adjusted_limit =
+            contracts_page_size_rate_limit(method, matched_path, request.uri().query())
+                .map(|page_size| scale_limit_by_page_size(base_limit, page_size))
+                .unwrap_or(base_limit);
 
-        if request.headers().contains_key(AUTHORIZATION) {
-            return (self.config.auth_limit, endpoint_key);
-        }
-
-        if is_write_method(method) {
-            return (self.config.write_limit, endpoint_key);
-        }
-
-        (self.config.read_limit, endpoint_key)
+        (adjusted_limit, endpoint_key)
     }
 }
 
@@ -391,6 +394,37 @@ fn is_write_method(method: &Method) -> bool {
         *method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     )
+}
+
+fn contracts_page_size_rate_limit(method: &Method, path: &str, query: Option<&str>) -> Option<u32> {
+    if *method != Method::GET || path != "/api/contracts" {
+        return None;
+    }
+
+    Some(extract_page_size(query).unwrap_or(DEFAULT_CONTRACTS_PAGE_SIZE))
+}
+
+fn extract_page_size(query: Option<&str>) -> Option<u32> {
+    let query = query?;
+
+    for pair in query.split('&') {
+        let mut parts = pair.splitn(2, '=');
+        let key = parts.next()?;
+        let value = parts.next().unwrap_or_default();
+
+        if key == "limit" || key == "page_size" {
+            if let Ok(parsed) = value.parse::<u32>() {
+                return Some(parsed.clamp(1, MAX_CONTRACTS_PAGE_SIZE));
+            }
+        }
+    }
+
+    None
+}
+
+fn scale_limit_by_page_size(base_limit: u32, page_size: u32) -> u32 {
+    let weight = page_size.div_ceil(DEFAULT_CONTRACTS_PAGE_SIZE).max(1);
+    (base_limit / weight).max(1)
 }
 
 fn endpoint_key(method: &Method, path: &str) -> String {
@@ -689,6 +723,54 @@ mod tests {
         .await;
 
         assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[tokio::test]
+    async fn contracts_rate_limit_scales_down_for_large_page_sizes() {
+        let app = test_app(100, 20, 10_000, Duration::from_secs(60));
+        let ip = "198.51.100.77";
+
+        for _ in 0..5 {
+            let response = call(
+                &app,
+                Request::builder()
+                    .uri("/api/contracts?limit=1000")
+                    .method("GET")
+                    .header("x-forwarded-for", ip)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await;
+
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+            assert_eq!(
+                response
+                    .headers()
+                    .get(HEADER_RATE_LIMIT_LIMIT)
+                    .and_then(|value| value.to_str().ok()),
+                Some("5")
+            );
+        }
+
+        let limited = call(
+            &app,
+            Request::builder()
+                .uri("/api/contracts?limit=1000")
+                .method("GET")
+                .header("x-forwarded-for", ip)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await;
+
+        assert_eq!(limited.status(), StatusCode::TOO_MANY_REQUESTS);
+    }
+
+    #[test]
+    fn page_size_scaling_uses_default_page_size_baseline() {
+        assert_eq!(scale_limit_by_page_size(100, 50), 100);
+        assert_eq!(scale_limit_by_page_size(100, 51), 50);
+        assert_eq!(scale_limit_by_page_size(100, 1000), 5);
     }
 
     /// Verify that the eviction logic correctly removes expired buckets.

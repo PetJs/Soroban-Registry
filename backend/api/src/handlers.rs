@@ -107,6 +107,39 @@ fn default_contracts_limit() -> i64 {
     20
 }
 
+const DEFAULT_CONTRACT_LIST_LIMIT: i64 = 50;
+const MAX_CONTRACT_LIST_LIMIT: i64 = 1000;
+
+fn validate_contract_list_pagination(
+    params: &ContractSearchParams,
+) -> Result<(i64, i64, i64), ApiError> {
+    let limit = params.limit.unwrap_or(DEFAULT_CONTRACT_LIST_LIMIT);
+    if !(1..=MAX_CONTRACT_LIST_LIMIT).contains(&limit) {
+        return Err(ApiError::bad_request(
+            "InvalidPaginationLimit",
+            format!(
+                "Invalid `limit` value {limit}. Expected an integer between 1 and {MAX_CONTRACT_LIST_LIMIT}."
+            ),
+        ));
+    }
+
+    if let Some(offset) = params.offset {
+        if offset < 0 {
+            return Err(ApiError::bad_request(
+                "InvalidPaginationOffset",
+                format!("Invalid `offset` value {offset}. Expected a non-negative integer."),
+            ));
+        }
+
+        let page = (offset / limit) + 1;
+        return Ok((limit, offset, page));
+    }
+
+    let page = params.page.unwrap_or(1).max(1);
+    let offset = (page - 1).max(0) * limit;
+    Ok((limit, offset, page))
+}
+
 fn extract_ip_address(headers: &HeaderMap) -> String {
     if let Some(forwarded_for) = headers
         .get("x-forwarded-for")
@@ -441,16 +474,16 @@ pub async fn list_contracts(
         Err(err) => return map_query_rejection(err).into_response(),
     };
 
-    let limit = params.limit.unwrap_or(20).clamp(1, 100);
+    let (limit, offset, page) = match validate_contract_list_pagination(&params) {
+        Ok(values) => values,
+        Err(err) => return err.into_response(),
+    };
 
-    // Cursor logic
     let cursor = params.cursor.as_ref().and_then(|c| Cursor::decode(c).ok());
-
     let (page, offset) = if cursor.is_some() {
-        (1, 0) // Ignore page/offset if cursor is present
+        (1, 0)
     } else {
-        let p = params.page.unwrap_or(1).max(1);
-        (p, (p - 1).max(0) * limit)
+        (page, offset)
     };
 
     let sort_by = params.sort_by.clone().unwrap_or_else(|| {
@@ -3072,5 +3105,76 @@ mod tests {
         assert_eq!(new["status"], "verified");
         assert_eq!(new["verification_id"], "abc123");
         assert_eq!(new["_ip_address"], "unknown");
+    }
+
+    #[test]
+    fn validate_contract_list_pagination_rejects_out_of_range_limit() {
+        let params = ContractSearchParams {
+            query: None,
+            network: None,
+            networks: None,
+            verified_only: None,
+            category: None,
+            tags: None,
+            maturity: None,
+            page: None,
+            limit: Some(5001),
+            offset: None,
+            sort_by: None,
+            sort_order: None,
+            cursor: None,
+        };
+
+        let err = validate_contract_list_pagination(&params).expect_err("limit should be rejected");
+        assert_eq!(err.to_string(), "InvalidPaginationLimit: Invalid `limit` value 5001. Expected an integer between 1 and 1000.");
+    }
+
+    #[test]
+    fn validate_contract_list_pagination_rejects_negative_offset() {
+        let params = ContractSearchParams {
+            query: None,
+            network: None,
+            networks: None,
+            verified_only: None,
+            category: None,
+            tags: None,
+            maturity: None,
+            page: None,
+            limit: Some(50),
+            offset: Some(-1),
+            sort_by: None,
+            sort_order: None,
+            cursor: None,
+        };
+
+        let err =
+            validate_contract_list_pagination(&params).expect_err("offset should be rejected");
+        assert_eq!(
+            err.to_string(),
+            "InvalidPaginationOffset: Invalid `offset` value -1. Expected a non-negative integer."
+        );
+    }
+
+    #[test]
+    fn validate_contract_list_pagination_uses_offset_when_provided() {
+        let params = ContractSearchParams {
+            query: None,
+            network: None,
+            networks: None,
+            verified_only: None,
+            category: None,
+            tags: None,
+            maturity: None,
+            page: Some(9),
+            limit: Some(50),
+            offset: Some(150),
+            sort_by: None,
+            sort_order: None,
+            cursor: None,
+        };
+
+        let (limit, offset, page) =
+            validate_contract_list_pagination(&params).expect("pagination should be valid");
+        assert_eq!((limit, offset, page), (50, 150, 4));
     }
 }
