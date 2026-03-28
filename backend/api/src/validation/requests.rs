@@ -257,6 +257,12 @@ impl Validatable for CreateInteractionRequest {
         if let Some(ref mut t) = self.transaction_hash {
             *t = trim(t);
         }
+        if let Some(ref mut target) = self.target_contract_id {
+            *target = trim(target);
+            if target.is_empty() {
+                self.target_contract_id = None;
+            }
+        }
         if let Some(ref mut p) = self.parameters {
             super::sanitizers::sanitize_json_value(p);
         }
@@ -278,6 +284,11 @@ impl Validatable for CreateInteractionRequest {
 
         if let Some(ref t) = self.transaction_hash {
             builder.check("transaction_hash", || validate_length(t, 64, 64));
+        }
+
+        if let Some(ref target) = self.target_contract_id {
+            builder.check("target_contract_id", || validate_length(target, 1, 128));
+            builder.check("target_contract_id", || validate_no_xss(target));
         }
 
         if let Some(ref p) = self.parameters {

@@ -231,6 +231,10 @@ pub struct GraphEdge {
     pub source: Uuid,
     pub target: Uuid,
     pub dependency_type: String,
+    pub call_frequency: Option<i64>,
+    pub call_volume: Option<i64>,
+    pub is_estimated: bool,
+    pub is_circular: bool,
 }
 
 /// Full graph response
@@ -580,6 +584,7 @@ pub struct CreateInteractionRequest {
     pub interaction_type: Option<String>,
     pub method: Option<String>,
     pub transaction_hash: Option<String>,
+    pub target_contract_id: Option<String>,
     pub parameters: Option<serde_json::Value>,
     pub return_value: Option<serde_json::Value>,
     pub timestamp: Option<DateTime<Utc>>,

@@ -169,6 +169,25 @@ export interface ContractVersion {
   created_at: string;
 }
 
+export interface ContractAbiResponse {
+  abi: unknown;
+}
+
+export interface ContractChangelogEntry {
+  version: string;
+  created_at: string;
+  commit_hash?: string;
+  source_url?: string;
+  release_notes?: string;
+  breaking: boolean;
+  breaking_changes: string[];
+}
+
+export interface ContractChangelogResponse {
+  contract_id: string;
+  entries: ContractChangelogEntry[];
+}
+
 export interface Publisher {
   id: string;
   stellar_address: string;
@@ -729,6 +748,22 @@ export const api = {
     );
   },
 
+  async getContractAbi(id: string, version?: string): Promise<ContractAbiResponse> {
+    const url = new URL(`${API_URL}/api/contracts/${id}/abi`);
+    if (version) url.searchParams.set("version", version);
+    return handleApiCall<ContractAbiResponse>(
+      () => fetch(url.toString()),
+      `/api/contracts/${id}/abi`
+    );
+  },
+
+  async getContractChangelog(id: string): Promise<ContractChangelogResponse> {
+    return handleApiCall<ContractChangelogResponse>(
+      () => fetch(`${API_URL}/api/contracts/${id}/changelog`),
+      `/api/contracts/${id}/changelog`
+    );
+  },
+
   async getContractDependencies(id: string): Promise<DependencyTreeNode[]> {
     return handleApiCall<DependencyTreeNode[]>(
       () => fetch(`${API_URL}/api/contracts/${id}/dependencies`),
@@ -1219,6 +1254,10 @@ export interface GraphEdge {
   source: string;
   target: string;
   dependency_type: string;
+  call_frequency?: number;
+  call_volume?: number;
+  is_estimated?: boolean;
+  is_circular?: boolean;
 }
 
 export interface GraphResponse {
