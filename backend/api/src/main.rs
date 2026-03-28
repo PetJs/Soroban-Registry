@@ -21,6 +21,8 @@ mod deprecation_handlers;
 mod error;
 mod events;
 mod handlers;
+mod dependency_handlers;
+
 mod health;
 pub mod health_monitor;
 #[cfg(test)]
