@@ -235,7 +235,9 @@ pub async fn status(json: bool) -> Result<()> {
         if let Some(cache) = load_cache() {
             eprintln!(
                 "{}",
-                "Network unreachable — showing cached data from ".yellow().to_string()
+                "Network unreachable — showing cached data from "
+                    .yellow()
+                    .to_string()
                     + &cache.cached_at.format("%Y-%m-%d %H:%M:%S UTC").to_string()
             );
             cache
