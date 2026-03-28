@@ -8,9 +8,10 @@ import ContractCardSkeleton from '@/components/ContractCardSkeleton';
 import { ActiveFilters } from '@/components/contracts/ActiveFilters';
 import { FilterPanel } from '@/components/contracts/FilterPanel';
 import { ResultsCount } from '@/components/contracts/ResultsCount';
+import { SearchBar } from '@/components/contracts/SearchBar';
 import { SortDropdown, SortBy } from '@/components/contracts/SortDropdown';
 import TagAutocomplete from '@/components/tags/TagAutocomplete';
-import { Filter, Package, SlidersHorizontal, X, Search, Sparkles, CheckCircle, Users } from 'lucide-react';
+import { Filter, Package, SlidersHorizontal, X, Sparkles, CheckCircle, Users } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAnalytics } from '@/hooks/useAnalytics';
 import QueryBuilder from '@/components/contracts/QueryBuilder';
@@ -507,44 +508,12 @@ export function ContractsContent() {
             {/* Inline search */}
             <div className="max-w-2xl mx-auto mb-10">
               {!isAdvancedSearch ? (
-                <div className="relative">
-                  <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-5 h-5 text-muted-foreground" />
-                  <input
-                    type="text"
-                    value={filters.query}
-                    onChange={(e) => setFilters((current) => ({ ...current, query: e.target.value, page: 1 }))}
-                    placeholder="Search contracts by name, category, or tag..."
-                    aria-label="Search contracts"
-                    aria-keyshortcuts="/"
-                    className="w-full pl-12 pr-24 py-4 rounded-xl border border-border bg-background text-foreground placeholder-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary shadow-lg"
-                  />
-                  {filters.query && (
-                    <button
-                      type="button"
-                      onClick={() => {
-                        logEvent('search_performed', {
-                          keyword: '',
-                          action: 'clear_query',
-                        });
-                        setFilters((current) => ({ ...current, query: '', page: 1 }));
-                      }}
-                      className="absolute right-20 top-1/2 -translate-y-1/2 p-1.5 rounded-md text-muted-foreground hover:text-foreground transition-colors"
-                      aria-label="Clear search"
-                    >
-                      <X className="w-4 h-4" />
-                    </button>
-                  )}
-                  <button
-                    type="button"
-                    onClick={() => setMobileFiltersOpen(true)}
-                    className="md:hidden absolute right-2 top-1/2 -translate-y-1/2 px-4 py-2 rounded-lg bg-primary text-primary-foreground hover:opacity-90 transition-opacity font-medium text-sm"
-                  >
-                    Filters
-                  </button>
-                  <div className="hidden md:flex absolute right-2 top-1/2 -translate-y-1/2 items-center gap-2">
-                    <kbd className="px-2 py-1 rounded bg-muted text-muted-foreground text-xs font-mono border border-border">/</kbd>
-                  </div>
-                </div>
+                <SearchBar
+                  value={filters.query}
+                  onChange={(value) => setFilters((current) => ({ ...current, query: value, page: 1 }))}
+                  onClear={() => setFilters((current) => ({ ...current, query: '', page: 1 }))}
+                  onCommit={(query) => setFilters((current) => ({ ...current, query, page: 1 }))}
+                />
               ) : (
                 <div className="space-y-6 text-left">
                   <QueryBuilder 
