@@ -35,6 +35,9 @@ pub struct Contract {
     /// Per-network config: { "mainnet": { contract_id, is_verified, min_version, max_version }, ... }
     #[serde(default)]
     pub network_configs: Option<serde_json::Value>,
+    /// Search relevance score (calculated at runtime)
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relevance_score: Option<f64>,
 }
 
 /// Response for GET /contracts/:id with optional network-specific slice (Issue #43)
@@ -1097,6 +1100,7 @@ pub enum AnalyticsEventType {
     VersionCreated,
     ContractUpdated,
     PublisherCreated,
+    SearchClick,
 }
 
 impl std::fmt::Display for AnalyticsEventType {
@@ -1108,6 +1112,7 @@ impl std::fmt::Display for AnalyticsEventType {
             Self::VersionCreated => write!(f, "version_created"),
             Self::ContractUpdated => write!(f, "contract_updated"),
             Self::PublisherCreated => write!(f, "publisher_created"),
+            Self::SearchClick => write!(f, "search_click"),
         }
     }
 }

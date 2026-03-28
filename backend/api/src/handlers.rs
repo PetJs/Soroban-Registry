@@ -31,6 +31,8 @@ use uuid::Uuid;
 #[derive(Debug, serde::Deserialize, utoipa::IntoParams)]
 pub struct GetContractQuery {
     pub network: Option<Network>,
+    pub from_search: Option<bool>,
+    pub search_query: Option<String>,
 }
 
 use crate::{
@@ -888,16 +890,47 @@ pub async fn list_contracts(
     let direction_op = if sort_order == shared::SortOrder::Asc { ">" } else { "<" };
     let id_direction = if sort_order == shared::SortOrder::Asc { "ASC" } else { "DESC" };
 
-    let mut query = QueryBuilder::new(
-        "SELECT c.* \
-         FROM contracts c \
-         LEFT JOIN contract_interactions ci ON c.id = ci.contract_id \
-         LEFT JOIN contract_versions cv ON c.id = cv.contract_id \
-         WHERE 1=1",
+    // Weights for ranking (configurable via parameters or default)
+    let w_text = params.w_text.unwrap_or(1.0);
+    let w_pop = params.w_pop.unwrap_or(0.5);
+    let w_rec = params.w_rec.unwrap_or(0.3);
+    let w_rat = params.w_rat.unwrap_or(0.4);
+    let w_pers = 0.5; // Weight for personalized boost
+
+    // Build dynamic query with advanced ranking
+    let mut query = String::from("WITH contract_stats AS (\n");
+    query.push_str(
+        "    SELECT 
+                c.id,
+                COUNT(DISTINCT ci.id) as interaction_count,
+                COUNT(DISTINCT cv.id) as deployment_count,
+                COALESCE(AVG(r.rating), 0) as avg_rating,
+                COUNT(DISTINCT r.id) as review_count",
     );
 
-    let mut count_query = QueryBuilder::new("SELECT COUNT(*) FROM contracts c WHERE 1=1");
+    if let Some(ref uid) = params.user_id {
+        let cleaned_uid = uid.replace('\'', "''");
+        query.push_str(&format!(
+            ",\n                COUNT(DISTINCT CASE WHEN ci.user_address = '{}' THEN ci.id END) as user_interaction_count",
+            cleaned_uid
+        ));
+    } else {
+        query.push_str(",\n                0 as user_interaction_count");
+    }
 
+    query.push_str(
+        "\n            FROM contracts c
+            LEFT JOIN contract_interactions ci ON c.id = ci.contract_id
+            LEFT JOIN contract_versions cv ON c.id = cv.contract_id
+            LEFT JOIN reviews r ON c.id = r.contract_id AND r.is_flagged = FALSE
+            GROUP BY c.id
+        ),\n",
+    );
+
+    query.push_str("ranked_contracts AS (\n");
+    query.push_str("    SELECT \n");
+    query.push_str("        c.*, \n");
+    
     if let Some(ref q) = params.query {
         query.push(" AND contracts_build_tsquery(");
         query.push_bind(q);
@@ -920,6 +953,13 @@ pub async fn list_contracts(
         count_query.push_bind(category);
     }
 
+    // Filter by network(s)
+    let network_list = params
+        .networks
+        .as_ref()
+        .filter(|n| !n.is_empty())
+        .cloned()
+        .or_else(|| params.network.map(|n| vec![n]));
     if let Some(ref nets) = network_list {
         query.push(" AND c.network IN (");
         let mut separated = query.separated(", ");
@@ -1067,7 +1107,10 @@ pub async fn list_contracts(
 
     let contracts: Vec<Contract> = match query.build_query_as().fetch_all(&state.db).await {
         Ok(rows) => rows,
-        Err(err) => return db_internal_error("list contracts", err).into_response(),
+        Err(err) => {
+            tracing::error!(query = %query, error = ?err, "Search query failed");
+            return db_internal_error("list contracts with ranking", err).into_response()
+        },
     };
 
     let total: i64 = match count_query.build_query_scalar().fetch_one(&state.db).await {
@@ -1092,7 +1135,6 @@ pub async fn list_contracts(
     }
 
     // Generate prev cursor if we have items and are not on the first page
-    // (Simplification: if we have a cursor, or page > 1)
     if params.cursor.is_some() || page > 1 {
         if let Some(first) = response.items.first() {
             if let Some(timestamp) = contract_timestamp_for_sort(first, &sort_by) {
@@ -1162,6 +1204,22 @@ pub async fn get_contract(
         None
     };
 
+    // Record search click if applicable
+    if query.from_search.unwrap_or(false) {
+        let _ = analytics::record_event(
+            &state.db,
+            shared::AnalyticsEventType::SearchClick,
+            Some(contract.id),
+            Some(contract.publisher_id),
+            None,
+            query.network.as_ref(),
+            Some(serde_json::json!({
+                "search_query": query.search_query,
+                "timestamp": chrono::Utc::now()
+            })),
+        )
+        .await;
+    }
     track_contract_access(&state, contract.id).await;
 
     Ok(Json(ContractGetResponse {
