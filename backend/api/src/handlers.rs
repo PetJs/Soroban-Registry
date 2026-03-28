@@ -11,21 +11,21 @@ use axum::{
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine as _};
 use ed25519_dalek::{Signature, Verifier, VerifyingKey};
 use serde_json::{json, Value};
-use sqlx::QueryBuilder;
 use shared::{
-    pagination::Cursor, AnalyticsEventType, AuditActionType, ChangePublisherRequest, Contract,
-    ContractAnalyticsResponse, ContractAuditLog, ContractChangelogEntry, ContractChangelogResponse,
-    ContractGetResponse, ContractInteractionResponse, ContractSearchParams, ContractVersion,
+    pagination::Cursor, AdvancedSearchRequest, AnalyticsEventType, AuditActionType,
+    ChangePublisherRequest, Contract, ContractAnalyticsResponse, ContractAuditLog,
+    ContractChangelogEntry, ContractChangelogResponse, ContractGetResponse,
+    ContractInteractionResponse, ContractSearchParams, ContractSource, ContractVersion,
     CreateContractVersionRequest, CreateInteractionBatchRequest, CreateInteractionRequest,
-    DeploymentStats, InteractionTimeSeriesPoint, InteractionTimeSeriesResponse,
-    InteractionsListResponse, InteractionsQueryParams, InteractorStats, Network, NetworkConfig,
-    NetworkEndpoints, NetworkInfo, NetworkListResponse, NetworkStatus, PaginatedResponse,
-    PublishRequest, Publisher, SearchSuggestion, SearchSuggestionsResponse, SemVer, TimelineEntry,
-    TopUser, TrendingParams,
-    UpdateContractMetadataRequest, UpdateContractStatusRequest, VerifyRequest,
-    AdvancedSearchRequest, FavoriteSearch, QueryNode, QueryOperator, FieldOperator, QueryCondition,
-    SaveFavoriteSearchRequest,
+    DeploymentStats, FavoriteSearch, FieldOperator, InteractionTimeSeriesPoint,
+    InteractionTimeSeriesResponse, InteractionsListResponse, InteractionsQueryParams,
+    InteractorStats, Network, NetworkConfig, NetworkEndpoints, NetworkInfo, NetworkListResponse,
+    NetworkStatus, PaginatedResponse, PublishRequest, Publisher, QueryCondition, QueryNode,
+    QueryOperator, SaveFavoriteSearchRequest, SearchSuggestion, SearchSuggestionsResponse, SemVer,
+    TimelineEntry, TopUser, TrendingParams, UpdateContractMetadataRequest,
+    UpdateContractStatusRequest, VerifyRequest,
 };
+use sqlx::QueryBuilder;
 use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 use uuid::Uuid;
@@ -87,7 +87,10 @@ fn sort_timestamp_column(sort_by: &shared::SortBy) -> Option<&'static str> {
     }
 }
 
-fn contract_timestamp_for_sort(contract: &Contract, sort_by: &shared::SortBy) -> Option<chrono::DateTime<chrono::Utc>> {
+fn contract_timestamp_for_sort(
+    contract: &Contract,
+    sort_by: &shared::SortBy,
+) -> Option<chrono::DateTime<chrono::Utc>> {
     match sort_by {
         shared::SortBy::CreatedAt => Some(contract.created_at),
         shared::SortBy::UpdatedAt => Some(contract.updated_at),
@@ -221,17 +224,19 @@ fn configured_networks() -> Vec<StaticNetworkDefinition> {
     entries
         .into_iter()
         .map(
-            |(id, name, network_type, rpc_env, explorer_env, friendbot_env)| StaticNetworkDefinition {
-                id,
-                name,
-                rpc_url: std::env::var(rpc_env)
-                    .unwrap_or_else(|_| default_rpc_url(&network_type).to_string()),
-                explorer_url: std::env::var(explorer_env)
-                    .unwrap_or_else(|_| default_explorer_url(&network_type).to_string()),
-                friendbot_url: std::env::var(friendbot_env)
-                    .ok()
-                    .or_else(|| default_friendbot_url(&network_type).map(str::to_string)),
-                network_type,
+            |(id, name, network_type, rpc_env, explorer_env, friendbot_env)| {
+                StaticNetworkDefinition {
+                    id,
+                    name,
+                    rpc_url: std::env::var(rpc_env)
+                        .unwrap_or_else(|_| default_rpc_url(&network_type).to_string()),
+                    explorer_url: std::env::var(explorer_env)
+                        .unwrap_or_else(|_| default_explorer_url(&network_type).to_string()),
+                    friendbot_url: std::env::var(friendbot_env)
+                        .ok()
+                        .or_else(|| default_friendbot_url(&network_type).map(str::to_string)),
+                    network_type,
+                }
             },
         )
         .collect()
@@ -250,15 +255,18 @@ fn derive_network_status(
     }
 
     if let Some(snapshot) = snapshot {
-        let stale = now - snapshot.indexed_at > chrono::Duration::minutes(NETWORK_STALE_AFTER_MINUTES);
+        let stale =
+            now - snapshot.indexed_at > chrono::Duration::minutes(NETWORK_STALE_AFTER_MINUTES);
 
         if snapshot.consecutive_failures >= NETWORK_OFFLINE_FAILURE_THRESHOLD {
             return (
                 NetworkStatus::Offline,
-                snapshot
-                    .error_message
-                    .clone()
-                    .or_else(|| Some(format!("{} consecutive indexer failures", snapshot.consecutive_failures))),
+                snapshot.error_message.clone().or_else(|| {
+                    Some(format!(
+                        "{} consecutive indexer failures",
+                        snapshot.consecutive_failures
+                    ))
+                }),
             );
         }
 
@@ -268,10 +276,12 @@ fn derive_network_status(
                 if stale {
                     Some("Indexer status is stale".to_string())
                 } else {
-                    snapshot
-                        .error_message
-                        .clone()
-                        .or_else(|| Some(format!("{} consecutive indexer failures", snapshot.consecutive_failures)))
+                    snapshot.error_message.clone().or_else(|| {
+                        Some(format!(
+                            "{} consecutive indexer failures",
+                            snapshot.consecutive_failures
+                        ))
+                    })
                 },
             );
         }
@@ -323,7 +333,10 @@ async fn fetch_network_catalog(db: &sqlx::PgPool) -> Result<NetworkListResponse,
             last_checked_at: now,
             last_indexed_ledger_height: snapshot.as_ref().map(|s| s.last_indexed_ledger_height),
             last_indexed_at: snapshot.as_ref().map(|s| s.indexed_at),
-            consecutive_failures: snapshot.as_ref().map(|s| s.consecutive_failures).unwrap_or(0),
+            consecutive_failures: snapshot
+                .as_ref()
+                .map(|s| s.consecutive_failures)
+                .unwrap_or(0),
             status_message,
         });
     }
@@ -376,7 +389,7 @@ pub enum ContractAuditEventType {
     PublisherChanged,
 }
 
-#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow)]
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize, sqlx::FromRow, utoipa::ToSchema)]
 #[allow(dead_code)]
 pub struct ContractAuditLogEntry {
     pub id: Uuid,
@@ -545,15 +558,6 @@ async fn write_contract_audit_log(
     Ok(())
 }
 
-#[utoipa::path(
-    get,
-    path = "/health",
-    responses(
-        (status = 200, description = "Service is healthy", body = Object),
-        (status = 503, description = "Service is unavailable or degraded", body = Object)
-    ),
-    tag = "Observability"
-)]
 fn split_audit_changes(
     changes: &serde_json::Value,
     ip_address: &str,
@@ -802,6 +806,15 @@ struct ContractInteractionInsert<'a> {
 
 const VERSION: &str = env!("CARGO_PKG_VERSION");
 
+#[utoipa::path(
+    get,
+    path = "/health",
+    responses(
+        (status = 200, description = "Service is healthy", body = Object),
+        (status = 503, description = "Service is unavailable or degraded", body = Object)
+    ),
+    tag = "Observability"
+)]
 pub async fn health_check(State(state): State<AppState>) -> (StatusCode, Json<Value>) {
     let uptime = state.started_at.elapsed().as_secs();
     let now = chrono::Utc::now().to_rfc3339();
@@ -956,7 +969,7 @@ pub async fn health_check_detailed(State(state): State<AppState>) -> (StatusCode
     get,
     path = "/api/stats",
     responses(
-        (status = 200, description = "Global registry statistics", body = Object)
+        (status = 200, description = "Global registry statistics", body = Object, example = json!({"total_contracts": 150, "verified_contracts": 120, "total_publishers": 45}))
     ),
     tag = "Observability"
 )]
@@ -1098,7 +1111,12 @@ pub async fn get_contract_search_suggestions(
     if let Ok(serialized) = serde_json::to_string(&response) {
         state
             .cache
-            .put("search", &cache_key, serialized, Some(Duration::from_secs(60)))
+            .put(
+                "search",
+                &cache_key,
+                serialized,
+                Some(Duration::from_secs(60)),
+            )
             .await;
     }
 
@@ -1119,6 +1137,7 @@ pub async fn get_contract_search_suggestions(
 )]
 pub async fn list_contracts(
     State(state): State<AppState>,
+    claims: Option<shared::AuthClaims>,
     params: Result<Query<ContractSearchParams>, QueryRejection>,
 ) -> axum::response::Response {
     let search_started_at = std::time::Instant::now();
@@ -1155,9 +1174,21 @@ pub async fn list_contracts(
         .or_else(|| params.network.map(|n| vec![n]));
 
     let timestamp_sort_column = sort_timestamp_column(&sort_by);
-    let direction = if sort_order == shared::SortOrder::Asc { "ASC" } else { "DESC" };
-    let direction_op = if sort_order == shared::SortOrder::Asc { ">" } else { "<" };
-    let id_direction = if sort_order == shared::SortOrder::Asc { "ASC" } else { "DESC" };
+    let direction = if sort_order == shared::SortOrder::Asc {
+        "ASC"
+    } else {
+        "DESC"
+    };
+    let direction_op = if sort_order == shared::SortOrder::Asc {
+        ">"
+    } else {
+        "<"
+    };
+    let id_direction = if sort_order == shared::SortOrder::Asc {
+        "ASC"
+    } else {
+        "DESC"
+    };
 
     // Weights for ranking (configurable via parameters or default)
     let w_text = params.w_text.unwrap_or(1.0);
@@ -1199,16 +1230,41 @@ pub async fn list_contracts(
     query.push_str("ranked_contracts AS (\n");
     query.push_str("    SELECT \n");
     query.push_str("        c.*, \n");
-    
-    if let Some(ref q) = params.query {
-        query.push(" AND contracts_build_tsquery(");
-        query.push_bind(q);
-        query.push(") @@ c.search_document");
 
-        count_query.push(" AND contracts_build_tsquery(");
-        count_query.push_bind(q);
-        count_query.push(") @@ c.search_document");
+    if let Some(ref q) = params.query {
+        // Clean query for tsquery
+        let cleaned_q = q.replace('\'', "''");
+        query.push_str(&format!(
+            "        ts_rank_cd(c.search_vector, plainto_tsquery('english', '{}')) as text_relevance,\n",
+            cleaned_q
+        ));
+    } else {
+        query.push_str("        0.0 as text_relevance,\n");
     }
+
+    query.push_str(&format!(
+        "        LOG(1 + cs.interaction_count + 2 * cs.deployment_count) as popularity_score,
+        1.0 / (1.0 + EXTRACT(DAYS FROM (NOW() - c.updated_at)) / 30.0) as recency_score,
+        (cs.avg_rating / 5.0) * LOG(1.0 + cs.review_count) as rating_score,
+        LOG(1 + cs.user_interaction_count) as personal_boost
+    FROM contracts c
+    JOIN contract_stats cs ON c.id = cs.id
+    WHERE (c.visibility = 'public'"
+    ));
+
+    let mut count_query =
+        String::from("SELECT COUNT(*) FROM contracts c WHERE (c.visibility = 'public'");
+
+    if let Some(claims) = claims {
+        let visibility_clause = format!(
+            " OR (c.visibility = 'private' AND c.organization_id IN (SELECT organization_id FROM organization_members om JOIN publishers p ON om.publisher_id = p.id WHERE p.stellar_address = '{}'))",
+            claims.sub.replace('\'', "''")
+        );
+        query.push_str(&visibility_clause);
+        count_query.push_str(&visibility_clause);
+    }
+    query.push_str(")");
+    count_query.push_str(")");
 
     if params.verified_only.unwrap_or(false) {
         query.push(" AND c.is_verified = true");
@@ -1379,8 +1435,8 @@ pub async fn list_contracts(
         Ok(rows) => rows,
         Err(err) => {
             tracing::error!(query = %query, error = ?err, "Search query failed");
-            return db_internal_error("list contracts with ranking", err).into_response()
-        },
+            return db_internal_error("list contracts with ranking", err).into_response();
+        }
     };
 
     let total: i64 = match count_query.build_query_scalar().fetch_one(&state.db).await {
@@ -1389,7 +1445,12 @@ pub async fn list_contracts(
     };
 
     if params.query.is_some() {
-        observe_search_query("contracts", search_started_at, params.query.as_deref(), limit);
+        observe_search_query(
+            "contracts",
+            search_started_at,
+            params.query.as_deref(),
+            limit,
+        );
     }
 
     let mut response = PaginatedResponse::new(contracts, total, page, limit);
@@ -1434,6 +1495,7 @@ pub async fn list_contracts(
 )]
 pub async fn get_contract(
     State(state): State<AppState>,
+    claims: Option<shared::AuthClaims>,
     Path(id): Path<String>,
     Query(query): Query<GetContractQuery>,
 ) -> ApiResult<Json<ContractGetResponse>> {
@@ -1455,6 +1517,33 @@ pub async fn get_contract(
             ),
             _ => db_internal_error("get contract by id", err),
         })?;
+
+    // Visibility check
+    if contract.visibility == shared::VisibilityType::Private {
+        let is_member = if let Some(ref claims) = claims {
+            if let Some(org_id) = contract.organization_id {
+                crate::org_handlers::check_org_role(
+                    &state.pool,
+                    org_id,
+                    &claims.sub,
+                    shared::OrganizationRole::Viewer,
+                )
+                .await
+                .is_ok()
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if !is_member {
+            return Err(ApiError::forbidden(
+                "AccessDenied",
+                "This contract is private and you do not have access to it",
+            ));
+        }
+    }
 
     let current_network = query.network;
     let network_config = if let Some(ref net) = current_network {
@@ -1609,16 +1698,372 @@ pub async fn get_contract_versions(
     Ok(Json(versions))
 }
 
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::ToSchema)]
+pub struct UploadContractSourceRequest {
+    pub source_base64: String,
+    pub source_format: String,
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct ContractSourceResponse {
+    pub id: Uuid,
+    pub contract_version_id: Uuid,
+    pub source_format: String,
+    pub storage_backend: String,
+    pub storage_key: String,
+    pub source_hash: String,
+    pub source_size: i64,
+    pub source_base64: Option<String>,
+    pub created_at: chrono::DateTime<chrono::Utc>,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize, utoipa::IntoParams)]
+pub struct ContractSourceQuery {
+    #[serde(default)]
+    pub source_format: Option<String>,
+}
+
+#[derive(Debug, serde::Serialize, utoipa::ToSchema)]
+pub struct ContractSourceDiffResponse {
+    pub base_version: String,
+    pub target_version: String,
+    pub source_format: String,
+    pub diff: String,
+}
+
 #[utoipa::path(
     post,
-    path = "/api/contracts/{id}/versions",
+    path = "/api/contracts/{id}/versions/{version}/source",
+    params(
+        ("id" = String, Path, description = "Contract UUID"),
+        ("version" = String, Path, description = "Contract version")
+    ),
+    request_body = UploadContractSourceRequest,
+    responses(
+        (status = 201, description = "Source uploaded", body = ContractSourceResponse),
+        (status = 400, description = "Invalid input"),
+        (status = 404, description = "Contract version not found")
+    ),
+    tag = "Source"
+)]
+pub async fn upload_contract_source(
+    State(state): State<AppState>,
+    Path((id, version)): Path<(String, String)>,
+    Json(req): Json<UploadContractSourceRequest>,
+) -> ApiResult<Json<ContractSourceResponse>> {
+    let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
+
+    let version_row: Option<ContractVersion> =
+        sqlx::query_as("SELECT * FROM contract_versions WHERE contract_id = $1 AND version = $2")
+            .bind(contract_uuid)
+            .bind(&version)
+            .fetch_optional(&state.db)
+            .await
+            .map_err(|err| db_internal_error("fetch contract version", err))?;
+
+    let version_row = version_row.ok_or_else(|| {
+        ApiError::not_found(
+            "ContractVersionNotFound",
+            format!(
+                "Version '{}' not found for contract {}",
+                version, contract_id
+            ),
+        )
+    })?;
+
+    let source_bytes = BASE64
+        .decode(&req.source_base64)
+        .map_err(|_| ApiError::bad_request("InvalidBase64", "source_base64 must be base64"))?;
+
+    let source_format = match req.source_format.to_lowercase().as_str() {
+        "rust" => shared::models::SourceFormat::Rust,
+        "wasm" => shared::models::SourceFormat::Wasm,
+        other => {
+            return Err(ApiError::bad_request(
+                "InvalidSourceFormat",
+                format!(
+                    "Unsupported source format '{}', expected 'rust' or 'wasm'",
+                    other
+                ),
+            ))
+        }
+    };
+
+    let (backend, storage_key, source_hash) = state
+        .source_storage
+        .store_source(&contract_id, &version, source_format.clone(), &source_bytes)
+        .await
+        .map_err(|e| ApiError::internal(format!("source storage error: {}", e)))?;
+
+    let source_size = source_bytes.len() as i64;
+
+    let source_row: ContractSource = sqlx::query_as(
+        "INSERT INTO contract_sources (contract_version_id, source_format, storage_backend, storage_key, source_hash, source_size) VALUES ($1, $2, $3, $4, $5, $6) RETURNING *",
+    )
+    .bind(version_row.id)
+    .bind(source_format)
+    .bind(&backend)
+    .bind(&storage_key)
+    .bind(&source_hash)
+    .bind(source_size)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("insert contract source", err))?;
+
+    sqlx::query(
+        "INSERT INTO source_access_logs (contract_source_id, action, actor, request_ip, user_agent, details) VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(source_row.id)
+    .bind("upload")
+    .bind(None::<String>)
+    .bind(None::<String>)
+    .bind(None::<String>)
+    .bind(None::<serde_json::Value>)
+    .execute(&state.db)
+    .await
+    .map_err(|err| db_internal_error("insert source access log", err))?;
+
+    Ok(Json(ContractSourceResponse {
+        id: source_row.id,
+        contract_version_id: source_row.contract_version_id,
+        source_format: source_row.source_format.to_string(),
+        storage_backend: source_row.storage_backend,
+        storage_key: source_row.storage_key,
+        source_hash: source_row.source_hash,
+        source_size: source_row.source_size,
+        source_base64: Some(req.source_base64),
+        created_at: source_row.created_at,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/versions/{version}/source",
+    params(
+        ("id" = String, Path, description = "Contract UUID"),
+        ("version" = String, Path, description = "Contract version")
+    ),
+    responses(
+        (status = 200, description = "Retrieve source", body = ContractSourceResponse),
+        (status = 404, description = "Source not found"),
+        (status = 500, description = "Integrity verification failed")
+    ),
+    tag = "Source"
+)]
+pub async fn get_contract_source(
+    State(state): State<AppState>,
+    Path((id, version)): Path<(String, String)>,
+    Query(query): Query<ContractSourceQuery>,
+) -> ApiResult<Json<ContractSourceResponse>> {
+    let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
+
+    let version_row: ContractVersion =
+        sqlx::query_as("SELECT * FROM contract_versions WHERE contract_id = $1 AND version = $2")
+            .bind(contract_uuid)
+            .bind(&version)
+            .fetch_one(&state.db)
+            .await
+            .map_err(|err| db_internal_error("fetch contract version", err))?;
+
+    let format = query
+        .source_format
+        .as_deref()
+        .unwrap_or("rust")
+        .to_lowercase();
+
+    let source_format = match format.as_str() {
+        "rust" => shared::models::SourceFormat::Rust,
+        "wasm" => shared::models::SourceFormat::Wasm,
+        other => {
+            return Err(ApiError::bad_request(
+                "InvalidSourceFormat",
+                format!(
+                    "Unsupported source format '{}', expected 'rust' or 'wasm'",
+                    other
+                ),
+            ))
+        }
+    };
+
+    let source_row: ContractSource = sqlx::query_as(
+        "SELECT * FROM contract_sources WHERE contract_version_id = $1 AND source_format = $2",
+    )
+    .bind(version_row.id)
+    .bind(source_format)
+    .fetch_one(&state.db)
+    .await
+    .map_err(|err| db_internal_error("fetch contract source", err))?;
+
+    let source_bytes = state
+        .source_storage
+        .retrieve_source(&source_row.storage_backend, &source_row.storage_key)
+        .await
+        .map_err(|e| ApiError::internal(format!("source storage error: {}", e)))?;
+
+    let check_hash = shared::source_storage::compute_sha256(&source_bytes);
+    if check_hash != source_row.source_hash {
+        return Err(ApiError::internal("Contract source integrity check failed"));
+    }
+
+    sqlx::query(
+        "INSERT INTO source_access_logs (contract_source_id, action, actor, request_ip, user_agent, details) VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(source_row.id)
+    .bind("retrieve")
+    .bind(None::<String>)
+    .bind(None::<String>)
+    .bind(None::<String>)
+    .bind(Some(json!({"ip": "unknown"})))
+    .execute(&state.db)
+    .await
+    .map_err(|err| db_internal_error("insert source access log", err))?;
+
+    Ok(Json(ContractSourceResponse {
+        id: source_row.id,
+        contract_version_id: source_row.contract_version_id,
+        source_format: source_row.source_format.to_string(),
+        storage_backend: source_row.storage_backend,
+        storage_key: source_row.storage_key,
+        source_hash: source_row.source_hash,
+        source_size: source_row.source_size,
+        source_base64: Some(BASE64.encode(source_bytes)),
+        created_at: source_row.created_at,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/versions/{version}/source/diff",
+    params(
+        ("id" = String, Path, description = "Contract UUID"),
+        ("version" = String, Path, description = "Contract version"),
+        ("compare_version" = String, Query, description = "Contract version to compare against")
+    ),
+    responses(
+        (status = 200, description = "Source diff", body = ContractSourceDiffResponse),
+        (status = 404, description = "Version/source not found"),
+        (status = 400, description = "Invalid input")
+    ),
+    tag = "Source"
+)]
+pub async fn get_contract_source_diff(
+    State(state): State<AppState>,
+    Path((id, version)): Path<(String, String)>,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> ApiResult<Json<ContractSourceDiffResponse>> {
+    let (contract_uuid, contract_id) = fetch_contract_identity(&state, &id).await?;
+
+    let compare_version = params
+        .get("compare_version")
+        .ok_or_else(|| {
+            ApiError::bad_request("MissingCompareVersion", "compare_version is required")
+        })?
+        .to_string();
+
+    async fn load_source(
+        state: &AppState,
+        contract_uuid: Uuid,
+        version: &str,
+        source_format: &str,
+    ) -> Result<(String, Uuid), ApiError> {
+        let version_row: ContractVersion = sqlx::query_as(
+            "SELECT * FROM contract_versions WHERE contract_id = $1 AND version = $2",
+        )
+        .bind(contract_uuid)
+        .bind(version)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch contract version", err))?;
+
+        let sf = match source_format {
+            "rust" => shared::models::SourceFormat::Rust,
+            "wasm" => shared::models::SourceFormat::Wasm,
+            _ => {
+                return Err(ApiError::bad_request(
+                    "InvalidSourceFormat",
+                    "source_format must be 'rust' or 'wasm'",
+                ));
+            }
+        };
+
+        let source_row: ContractSource = sqlx::query_as(
+            "SELECT * FROM contract_sources WHERE contract_version_id = $1 AND source_format = $2",
+        )
+        .bind(version_row.id)
+        .bind(sf)
+        .fetch_one(&state.db)
+        .await
+        .map_err(|err| db_internal_error("fetch contract source", err))?;
+
+        let bytes = state
+            .source_storage
+            .retrieve_source(&source_row.storage_backend, &source_row.storage_key)
+            .await
+            .map_err(|e| ApiError::internal(format!("source storage error: {}", e)))?;
+
+        let check_hash = shared::source_storage::compute_sha256(&bytes);
+        if check_hash != source_row.source_hash {
+            return Err(ApiError::internal("Contract source integrity check failed"));
+        }
+
+        let data_str = String::from_utf8(bytes)
+            .map_err(|_| ApiError::internal("Source content is not UTF-8 serializable"))?;
+
+        Ok((data_str, source_row.id))
+    }
+
+    let source_format = params
+        .get("source_format")
+        .map(|s| s.as_str())
+        .unwrap_or("rust");
+
+    let (base_source, base_source_id) =
+        load_source(&state, contract_uuid, &version, source_format).await?;
+    let (compare_source, compare_source_id) =
+        load_source(&state, contract_uuid, &compare_version, source_format).await?;
+
+    let diff = difference::Changeset::new(&compare_source, &base_source, "\n");
+    let diff_text = diff
+        .diffs
+        .iter()
+        .map(|chunk| match chunk {
+            difference::Difference::Same(txt) => format!(" {}", txt),
+            difference::Difference::Add(txt) => format!("+{}", txt),
+            difference::Difference::Rem(txt) => format!("-{}", txt),
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    sqlx::query(
+        "INSERT INTO source_access_logs (contract_source_id, action, actor, request_ip, user_agent, details) VALUES ($1, $2, $3, $4, $5, $6)",
+    )
+    .bind(base_source_id)
+    .bind("diff")
+    .bind(None::<String>)
+    .bind(None::<String>)
+    .bind(None::<String>)
+    .bind(Some(json!({"compare_version": compare_version, "target_version": version})))
+    .execute(&state.db)
+    .await
+    .map_err(|err| db_internal_error("insert source access log", err))?;
+
+    Ok(Json(ContractSourceDiffResponse {
+        base_version: compare_version,
+        target_version: version,
+        source_format: source_format.to_string(),
+        diff: diff_text,
+    }))
+}
+
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/changelog",
     params(
         ("id" = String, Path, description = "Contract UUID")
     ),
-    request_body = CreateContractVersionRequest,
     responses(
-        (status = 201, description = "Version created successfully", body = ContractVersion),
-        (status = 400, description = "Invalid input or version conflict"),
+        (status = 200, description = "Contract changelog with breaking-change markers", body = ContractChangelogResponse),
+        (status = 400, description = "Invalid contract ID format"),
         (status = 404, description = "Contract not found")
     ),
     tag = "Versions"
@@ -1695,6 +2140,20 @@ pub async fn get_contract_changelog(
     }))
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/contracts/{id}/versions",
+    params(
+        ("id" = String, Path, description = "Contract UUID")
+    ),
+    request_body = CreateContractVersionRequest,
+    responses(
+        (status = 201, description = "Version created successfully", body = ContractVersion),
+        (status = 400, description = "Invalid input or version conflict"),
+        (status = 404, description = "Contract not found")
+    ),
+    tag = "Versions"
+)]
 pub async fn create_contract_version(
     State(state): State<AppState>,
     Path(id): Path<String>,
@@ -1897,13 +2356,11 @@ pub async fn create_contract_version(
     .await
     .map_err(|err| db_internal_error("insert contract abi", err))?;
 
-    sqlx::query(
-        "UPDATE contracts SET deployment_count = deployment_count + 1 WHERE id = $1",
-    )
-    .bind(contract_uuid)
-    .execute(&mut *tx)
-    .await
-    .map_err(|err| db_internal_error("increment deployment count", err))?;
+    sqlx::query("UPDATE contracts SET deployment_count = deployment_count + 1 WHERE id = $1")
+        .bind(contract_uuid)
+        .execute(&mut *tx)
+        .await
+        .map_err(|err| db_internal_error("increment deployment count", err))?;
 
     tx.commit()
         .await
@@ -1953,7 +2410,10 @@ pub async fn create_contract_version(
     {
         state
             .contract_events
-            .publish(ContractEventEnvelope::version_created(&contract, &version_row));
+            .publish(ContractEventEnvelope::version_created(
+                &contract,
+                &version_row,
+            ));
     }
 
     Ok(Json(version_row))
@@ -1992,17 +2452,6 @@ async fn fetch_contract_identity(state: &AppState, id: &str) -> ApiResult<(Uuid,
     })
 }
 
-#[utoipa::path(
-    post,
-    path = "/api/contracts",
-    request_body = PublishRequest,
-    responses(
-        (status = 201, description = "Contract published successfully", body = Contract),
-        (status = 400, description = "Invalid input or contract ID"),
-        (status = 409, description = "Contract already registered")
-    ),
-    tag = "Contracts"
-)]
 async fn ensure_contract_exists(
     state: &AppState,
     contract_uuid: Uuid,
@@ -2046,6 +2495,17 @@ async fn fetch_contract_network(
     })
 }
 
+#[utoipa::path(
+    post,
+    path = "/api/contracts",
+    request_body = PublishRequest,
+    responses(
+        (status = 201, description = "Contract published successfully", body = Contract),
+        (status = 400, description = "Invalid input or contract ID"),
+        (status = 409, description = "Contract already registered")
+    ),
+    tag = "Contracts"
+)]
 pub async fn publish_contract(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -2189,10 +2649,21 @@ pub async fn publish_contract(
     )
     .await;
 
-    state.contract_events.publish(ContractEventEnvelope::deployed(
-        &contract,
-        Some(publisher.stellar_address.clone()),
-    ));
+    state
+        .contract_events
+        .publish(ContractEventEnvelope::deployed(
+            &contract,
+            Some(publisher.stellar_address.clone()),
+        ));
+
+    if req.is_cicd {
+        crate::events::emit_cicd_pipeline(
+            &state,
+            contract.contract_id.clone(),
+            "published".to_string(),
+            4, // Step 4 of 5
+        );
+    }
 
     Ok(Json(contract))
 }
@@ -2458,101 +2929,17 @@ pub async fn update_contract_state() -> impl IntoResponse {
     planned_not_implemented_response()
 }
 
-/// GET /api/contracts/:id/analytics — timeline and top users from contract_interactions (Issue #46).
 #[utoipa::path(
     get,
-    path = "/api/contracts/{id}/analytics",
+    path = "/api/contracts/{id}/trust-score",
     params(
         ("id" = String, Path, description = "Contract UUID")
     ),
     responses(
-        (status = 200, description = "Contract analytics and usage data", body = ContractAnalyticsResponse),
-        (status = 404, description = "Contract not found")
+        (status = 501, description = "Not yet implemented – this endpoint is planned")
     ),
-    tag = "Analytics"
+    tag = "Security"
 )]
-pub async fn get_contract_analytics(
-    State(state): State<AppState>,
-    Path(id): Path<String>,
-) -> ApiResult<Json<ContractAnalyticsResponse>> {
-    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
-        ApiError::bad_request(
-            "InvalidContractId",
-            format!("Invalid contract ID format: {}", id),
-        )
-    })?;
-
-    ensure_contract_exists(&state, contract_uuid, &id, "get contract for analytics").await?;
-
-    let thirty_days_ago = chrono::Utc::now() - chrono::Duration::days(30);
-
-    let unique_count: i64 = sqlx::query_scalar(
-        "SELECT COUNT(DISTINCT user_address) FROM contract_interactions \
-         WHERE contract_id = $1 AND user_address IS NOT NULL",
-    )
-    .bind(contract_uuid)
-    .fetch_one(&state.db)
-    .await
-    .map_err(|e| db_internal_error("analytics unique interactors", e))?;
-
-    let top_user_rows: Vec<(Option<String>, i64)> = sqlx::query_as(
-        "SELECT user_address, COUNT(*) AS cnt FROM contract_interactions \
-         WHERE contract_id = $1 AND user_address IS NOT NULL \
-         GROUP BY user_address ORDER BY cnt DESC LIMIT 10",
-    )
-    .bind(contract_uuid)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| db_internal_error("analytics top users", e))?;
-
-    let top_users: Vec<TopUser> = top_user_rows
-        .into_iter()
-        .filter_map(|(addr, count)| addr.map(|a| TopUser { address: a, count }))
-        .collect();
-
-    let timeline_rows: Vec<(chrono::NaiveDate, i64)> = sqlx::query_as(
-        r#"
-        SELECT d::date AS date, COALESCE(e.cnt, 0)::bigint AS count
-        FROM generate_series(
-            ($1::timestamptz)::date,
-            CURRENT_DATE,
-            '1 day'::interval
-        ) d
-        LEFT JOIN (
-            SELECT created_at::date AS event_date, COUNT(*) AS cnt
-            FROM contract_interactions
-            WHERE contract_id = $2 AND created_at >= $1
-            GROUP BY created_at::date
-        ) e ON d::date = e.event_date
-        ORDER BY d::date
-        "#,
-    )
-    .bind(thirty_days_ago)
-    .bind(contract_uuid)
-    .fetch_all(&state.db)
-    .await
-    .map_err(|e| db_internal_error("analytics timeline", e))?;
-
-    let timeline: Vec<TimelineEntry> = timeline_rows
-        .into_iter()
-        .map(|(date, count)| TimelineEntry { date, count })
-        .collect();
-
-    Ok(Json(ContractAnalyticsResponse {
-        contract_id: contract_uuid,
-        deployments: DeploymentStats {
-            count: 0,
-            unique_users: 0,
-            by_network: serde_json::json!({}),
-        },
-        interactors: InteractorStats {
-            unique_count,
-            top_users,
-        },
-        timeline,
-    }))
-}
-
 pub async fn get_trust_score() -> impl IntoResponse {
     planned_not_implemented_response()
 }
@@ -3255,11 +3642,13 @@ pub async fn update_contract_metadata(
         )
         .await;
 
-        state.contract_events.publish(ContractEventEnvelope::metadata_updated(
-            &after,
-            changes_value,
-            ContractEventVisibility::Public,
-        ));
+        state
+            .contract_events
+            .publish(ContractEventEnvelope::metadata_updated(
+                &after,
+                changes_value,
+                ContractEventVisibility::Public,
+            ));
     }
 
     Ok(Json(after))
@@ -3497,25 +3886,29 @@ pub async fn update_contract_status(
         .await
         .map_err(|err| db_internal_error("fetch contract after status update", err))?;
 
-    state.contract_events.publish(ContractEventEnvelope::status_updated(
-        &contract_after,
-        normalized_status.clone(),
-        is_verified_after,
-        None,
-        ContractEventVisibility::Public,
-    ));
-
-    if req.error_message.is_some() {
-        state.contract_events.publish(ContractEventEnvelope::status_updated(
+    state
+        .contract_events
+        .publish(ContractEventEnvelope::status_updated(
             &contract_after,
             normalized_status.clone(),
             is_verified_after,
-            Some(json!({
-                "error_message": req.error_message,
-                "publisher_id": contract.publisher_id,
-            })),
-            ContractEventVisibility::Private,
+            None,
+            ContractEventVisibility::Public,
         ));
+
+    if req.error_message.is_some() {
+        state
+            .contract_events
+            .publish(ContractEventEnvelope::status_updated(
+                &contract_after,
+                normalized_status.clone(),
+                is_verified_after,
+                Some(json!({
+                    "error_message": req.error_message,
+                    "publisher_id": contract.publisher_id,
+                })),
+                ContractEventVisibility::Private,
+            ));
     }
 
     Ok(Json(json!({
@@ -3638,6 +4031,40 @@ pub async fn get_all_audit_logs(
     ),
     tag = "Deployments"
 )]
+#[utoipa::path(
+    get,
+    path = "/api/contracts/{id}/deployments",
+    params(
+        ("id" = String, Path, description = "Contract UUID")
+    ),
+    responses(
+        (status = 200, description = "List of contract deployments", body = [ContractDeployment]),
+        (status = 404, description = "Contract not found")
+    ),
+    tag = "Deployments"
+)]
+pub async fn get_contract_deployments(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> ApiResult<Json<Vec<ContractDeployment>>> {
+    let contract_uuid = Uuid::parse_str(&id).map_err(|_| {
+        ApiError::bad_request(
+            "InvalidContractId",
+            format!("Invalid contract ID format: {}", id),
+        )
+    })?;
+
+    let deployments: Vec<ContractDeployment> = sqlx::query_as(
+        "SELECT * FROM contract_deployments WHERE contract_id = $1 ORDER BY deployed_at DESC",
+    )
+    .bind(contract_uuid)
+    .fetch_all(&state.db)
+    .await
+    .map_err(|err| db_internal_error("get contract deployments", err))?;
+
+    Ok(Json(deployments))
+}
+
 pub async fn get_deployment_status() -> impl IntoResponse {
     planned_not_implemented_response()
 }
@@ -4131,9 +4558,18 @@ mod tests {
             network_configs: None,
         };
 
-        assert_eq!(sort_timestamp_column(&shared::SortBy::CreatedAt), Some("c.created_at"));
-        assert_eq!(sort_timestamp_column(&shared::SortBy::UpdatedAt), Some("c.updated_at"));
-        assert_eq!(sort_timestamp_column(&shared::SortBy::VerifiedAt), Some("c.verified_at"));
+        assert_eq!(
+            sort_timestamp_column(&shared::SortBy::CreatedAt),
+            Some("c.created_at")
+        );
+        assert_eq!(
+            sort_timestamp_column(&shared::SortBy::UpdatedAt),
+            Some("c.updated_at")
+        );
+        assert_eq!(
+            sort_timestamp_column(&shared::SortBy::VerifiedAt),
+            Some("c.verified_at")
+        );
         assert_eq!(
             sort_timestamp_column(&shared::SortBy::LastAccessedAt),
             Some("c.last_accessed_at")
@@ -4214,7 +4650,7 @@ pub async fn advanced_search_contracts(
 
     let mut query_builder: sqlx::QueryBuilder<'_, sqlx::Postgres> =
         sqlx::QueryBuilder::new("SELECT c.* FROM contracts c ");
-    
+
     // Add joins for sorting/filtering if needed
     query_builder.push("LEFT JOIN contract_interactions ci ON c.id = ci.contract_id ");
     query_builder.push("LEFT JOIN contract_versions cv ON c.id = cv.contract_id ");
@@ -4228,22 +4664,32 @@ pub async fn advanced_search_contracts(
     // Sorting
     let sort_by = req.sort_by.unwrap_or(shared::SortBy::CreatedAt);
     let sort_order = req.sort_order.unwrap_or(shared::SortOrder::Desc);
-    let direction = if sort_order == shared::SortOrder::Asc { "ASC" } else { "DESC" };
+    let direction = if sort_order == shared::SortOrder::Asc {
+        "ASC"
+    } else {
+        "DESC"
+    };
 
     query_builder.push(" ORDER BY ");
     match sort_by {
-        shared::SortBy::CreatedAt => { query_builder.push("c.created_at "); },
-        shared::SortBy::UpdatedAt => { query_builder.push("c.updated_at "); },
+        shared::SortBy::CreatedAt => {
+            query_builder.push("c.created_at ");
+        }
+        shared::SortBy::UpdatedAt => {
+            query_builder.push("c.updated_at ");
+        }
         shared::SortBy::Popularity | shared::SortBy::Interactions => {
             query_builder.push("COUNT(DISTINCT ci.id) ");
-        },
+        }
         shared::SortBy::Deployments => {
             query_builder.push("COUNT(DISTINCT cv.id) ");
-        },
+        }
         shared::SortBy::Relevance => {
             query_builder.push("c.created_at "); // Default relevance if no query term
-        },
-        _ => { query_builder.push("c.created_at "); }
+        }
+        _ => {
+            query_builder.push("c.created_at ");
+        }
     }
     query_builder.push(direction);
     query_builder.push(", c.id DESC ");
@@ -4255,7 +4701,9 @@ pub async fn advanced_search_contracts(
     query_builder.push_bind(offset);
 
     let query = query_builder.build_query_as::<Contract>();
-    let contracts = query.fetch_all(&state.db).await
+    let contracts = query
+        .fetch_all(&state.db)
+        .await
         .map_err(|err| db_internal_error("advanced search contracts", err))?;
 
     // Count total matches (naively for now, same filters)
@@ -4264,7 +4712,10 @@ pub async fn advanced_search_contracts(
     count_builder.push("WHERE 1=1 ");
     build_where_clause(&mut count_builder, &req.query)?;
 
-    let total: i64 = count_builder.build_query_scalar().fetch_one(&state.db).await
+    let total: i64 = count_builder
+        .build_query_scalar()
+        .fetch_one(&state.db)
+        .await
         .map_err(|err| db_internal_error("count advanced search", err))?;
 
     Ok(Json(PaginatedResponse::new(contracts, total, page, limit)))
@@ -4279,8 +4730,13 @@ fn build_where_clause<'a>(
             builder.push(" AND ");
             apply_condition(builder, cond)?;
         }
-        QueryNode::Group { operator, conditions } => {
-            if conditions.is_empty() { return Ok(()); }
+        QueryNode::Group {
+            operator,
+            conditions,
+        } => {
+            if conditions.is_empty() {
+                return Ok(());
+            }
             builder.push(" AND (");
             for (i, child) in conditions.iter().enumerate() {
                 if i > 0 {
@@ -4289,7 +4745,7 @@ fn build_where_clause<'a>(
                         QueryOperator::Or => builder.push(" OR "),
                     };
                 }
-                
+
                 // For groups we need to wrap children
                 match child {
                     QueryNode::Condition(c) => apply_condition(builder, c)?,
@@ -4317,7 +4773,12 @@ fn apply_condition<'a>(
         "network" => "c.network",
         "verified" => "c.is_verified",
         "publisher" => "c.publisher_id",
-        _ => return Err(ApiError::bad_request("InvalidField", format!("Field '{}' is not searchable", cond.field))),
+        _ => {
+            return Err(ApiError::bad_request(
+                "InvalidField",
+                format!("Field '{}' is not searchable", cond.field),
+            ))
+        }
     };
 
     builder.push(field);
@@ -4379,10 +4840,11 @@ pub async fn list_favorite_searches(
     State(state): State<AppState>,
 ) -> ApiResult<Json<Vec<FavoriteSearch>>> {
     // For now, return all since we don't have a strict user_id auth yet
-    let favorites: Vec<FavoriteSearch> = sqlx::query_as("SELECT * FROM favorite_searches ORDER BY created_at DESC")
-        .fetch_all(&state.db)
-        .await
-        .map_err(|err| db_internal_error("list favorite searches", err))?;
+    let favorites: Vec<FavoriteSearch> =
+        sqlx::query_as("SELECT * FROM favorite_searches ORDER BY created_at DESC")
+            .fetch_all(&state.db)
+            .await
+            .map_err(|err| db_internal_error("list favorite searches", err))?;
 
     Ok(Json(favorites))
 }
@@ -4401,11 +4863,12 @@ pub async fn save_favorite_search(
     State(state): State<AppState>,
     ValidatedJson(req): ValidatedJson<SaveFavoriteSearchRequest>,
 ) -> ApiResult<Json<FavoriteSearch>> {
-    let query_json = serde_json::to_value(&req.query)
-        .map_err(|e| ApiError::bad_request("InvalidQuery", format!("Failed to serialize query: {}", e)))?;
+    let query_json = serde_json::to_value(&req.query).map_err(|e| {
+        ApiError::bad_request("InvalidQuery", format!("Failed to serialize query: {}", e))
+    })?;
 
     let favorite: FavoriteSearch = sqlx::query_as(
-        "INSERT INTO favorite_searches (name, query_json) VALUES ($1, $2) RETURNING *"
+        "INSERT INTO favorite_searches (name, query_json) VALUES ($1, $2) RETURNING *",
     )
     .bind(&req.name)
     .bind(query_json)
@@ -4433,7 +4896,8 @@ pub async fn delete_favorite_search(
     State(state): State<AppState>,
     Path(id): Path<String>,
 ) -> ApiResult<StatusCode> {
-    let uuid = Uuid::parse_str(&id).map_err(|_| ApiError::bad_request("InvalidId", "Invalid favorite search ID format"))?;
+    let uuid = Uuid::parse_str(&id)
+        .map_err(|_| ApiError::bad_request("InvalidId", "Invalid favorite search ID format"))?;
 
     let result = sqlx::query("DELETE FROM favorite_searches WHERE id = $1")
         .bind(uuid)
@@ -4442,7 +4906,10 @@ pub async fn delete_favorite_search(
         .map_err(|err| db_internal_error("delete favorite search", err))?;
 
     if result.rows_affected() == 0 {
-        return Err(ApiError::not_found("FavoriteNotFound", "Favorite search not found"));
+        return Err(ApiError::not_found(
+            "FavoriteNotFound",
+            "Favorite search not found",
+        ));
     }
 
     Ok(StatusCode::NO_CONTENT)

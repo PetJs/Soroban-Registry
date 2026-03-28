@@ -51,7 +51,7 @@ export default function RealtimeProvider({ children }: RealtimeProviderProps) {
     });
 
     // Handle update events
-    const unsubscribeUpdate = wsService.on('contract_updated', (data: any) => {
+    const unsubscribeUpdate = wsService.on('contract_updated', (data: Record<string, unknown>) => {
       const preferences = localStorage.getItem('notification-preferences');
       if (preferences) {
         const prefs = JSON.parse(preferences);
@@ -77,7 +77,7 @@ export default function RealtimeProvider({ children }: RealtimeProviderProps) {
     };
   }, []);
 
-  const subscribe = useCallback((type: string, handler: (data: any) => void) => {
+  const subscribe = useCallback((type: string, handler: (data: unknown) => void) => {
     return wsService.on(type, handler);
   }, []);
 
@@ -86,7 +86,7 @@ export default function RealtimeProvider({ children }: RealtimeProviderProps) {
     setUnreadCount(0);
   }, []);
 
-  const markAsRead = useCallback((notificationId: string) => {
+  const markAsRead = useCallback((_notificationId: string) => {
     if (unreadCount > 0) {
       setUnreadCount(prev => prev - 1);
     }

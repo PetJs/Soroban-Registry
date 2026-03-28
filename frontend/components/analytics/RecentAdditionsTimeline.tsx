@@ -2,7 +2,7 @@ import React from 'react';
 import Link from 'next/link';
 import { Clock, ExternalLink } from 'lucide-react';
 
-export default function RecentAdditionsTimeline({ data }: { data: any[] }) {
+export default function RecentAdditionsTimeline({ data }: { data: Record<string, unknown>[] }) {
   if (!data || data.length === 0) {
     return <div className="h-full flex items-center justify-center text-muted-foreground text-sm">No recent additions</div>;
   }
@@ -10,7 +10,7 @@ export default function RecentAdditionsTimeline({ data }: { data: any[] }) {
   return (
     <div className="space-y-4">
       <div className="relative border-l border-border ml-3 space-y-6 pb-2">
-        {data.map((contract, i) => {
+        {data.map((contract) => {
           const formattedDate = new Date(contract.created_at).toLocaleDateString(undefined, {
             month: 'short',
             day: 'numeric',

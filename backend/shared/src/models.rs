@@ -10,6 +10,20 @@ use uuid::Uuid;
 
 /// Represents a smart contract in the registry
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+#[schema(example = json!({
+    "id": "550e8400-e29b-41d4-a716-446655440000",
+    "contract_id": "C...1234",
+    "wasm_hash": "a1b2c3d4...",
+    "name": "YieldOptimizer",
+    "description": "Optimizes yield across protocols",
+    "publisher_id": "550e8400-e29b-41d4-a716-446655440001",
+    "network": "mainnet",
+    "is_verified": true,
+    "category": "DeFi",
+    "tags": ["yield", "optimization"],
+    "created_at": "2023-10-27T10:00:00Z",
+    "updated_at": "2023-10-27T10:00:00Z"
+}))]
 pub struct Contract {
     pub id: Uuid,
     pub contract_id: String,
@@ -38,6 +52,21 @@ pub struct Contract {
     /// Search relevance score (calculated at runtime)
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub relevance_score: Option<f64>,
+    /// Organization that owns this contract (for private registries)
+    pub organization_id: Option<Uuid>,
+    /// Visibility level
+    pub visibility: VisibilityType,
+}
+
+#[derive(
+    Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Default,
+)]
+#[sqlx(type_name = "visibility_type", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum VisibilityType {
+    #[default]
+    Public,
+    Private,
 }
 
 /// Response for GET /contracts/:id with optional network-specific slice (Issue #43)
@@ -159,6 +188,74 @@ pub struct ContractVersion {
     pub signature_algorithm: Option<String>,
 }
 
+// ═══════════════════════════════════════════════════════════════════════════
+// MULTI-TENANCY TYPES (Issue #420)
+// ═══════════════════════════════════════════════════════════════════════════
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
+#[sqlx(type_name = "organization_role", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum OrganizationRole {
+    Admin,
+    Member,
+    Viewer,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct Organization {
+    pub id: Uuid,
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub is_private: bool,
+    pub quota_contracts: i32,
+    pub rate_limit_requests: i32,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct OrganizationMember {
+    pub organization_id: Uuid,
+    pub publisher_id: Uuid,
+    pub role: OrganizationRole,
+    pub joined_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct OrganizationInvitation {
+    pub id: Uuid,
+    pub organization_id: Uuid,
+    pub email: String,
+    pub role: OrganizationRole,
+    pub token: String,
+    pub inviter_id: Uuid,
+    pub expires_at: DateTime<Utc>,
+    pub created_at: DateTime<Utc>,
+    pub accepted_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct CreateOrganizationRequest {
+    pub name: String,
+    pub slug: String,
+    pub description: Option<String>,
+    pub is_private: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct InviteMemberRequest {
+    pub email: String,
+    pub role: OrganizationRole,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct UpdateOrganizationRequest {
+    pub name: Option<String>,
+    pub description: Option<String>,
+    pub is_private: Option<bool>,
+}
+
 /// Verification status and details
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
 pub struct Verification {
@@ -183,19 +280,16 @@ pub enum VerificationStatus {
 }
 
 /// Security audit status of the contract (Issue #401)
-#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
+#[derive(
+    Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq, Default,
+)]
 #[sqlx(type_name = "audit_status_type", rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum AuditStatus {
+    #[default]
     None,
     Pending,
     Passed,
     Failed,
-}
-
-impl Default for AuditStatus {
-    fn default() -> Self {
-        Self::None
-    }
 }
 
 /// Contract maturity level - indicates stability and production readiness
@@ -209,6 +303,15 @@ pub enum MaturityLevel {
 
 /// Publisher/developer information
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+#[schema(example = json!({
+    "id": "550e8400-e29b-41d4-a716-446655440001",
+    "stellar_address": "GABC...",
+    "username": "SorobanDev",
+    "email": "dev@soroban.io",
+    "github_url": "https://github.com/sorobandev",
+    "website": "https://soroban.io",
+    "created_at": "2023-10-27T10:00:00Z"
+}))]
 pub struct Publisher {
     pub id: Uuid,
     pub stellar_address: String,
@@ -275,6 +378,9 @@ pub struct PublishRequest {
     // Dependencies (new field)
     #[serde(default)]
     pub dependencies: Vec<DependencyDeclaration>,
+    /// Whether this was published via CI/CD (Issue #529)
+    #[serde(default)]
+    pub is_cicd: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
@@ -436,15 +542,20 @@ pub struct BatchVerifyRequest {
 
 /// Sorting options for contracts
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, utoipa::ToSchema)]
-#[serde(rename_all = "lowercase")]
 pub enum SortBy {
+    #[serde(rename = "created_at", alias = "createdat")]
     CreatedAt,
+    #[serde(rename = "updated_at", alias = "updatedat")]
     UpdatedAt,
     VerifiedAt,
     LastAccessedAt,
     Popularity,
+    #[serde(rename = "deployments")]
     Deployments,
+    // Kept for backwards/UX compatibility: the frontend supports "downloads".
+    #[serde(rename = "interactions", alias = "downloads")]
     Interactions,
+    #[serde(rename = "relevance")]
     Relevance,
 }
 
@@ -2248,7 +2359,7 @@ pub struct ReleaseNotesResponse {
 // Contract changelog (release history)
 // ────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ContractChangelogEntry {
     pub version: String,
     pub created_at: DateTime<Utc>,
@@ -2263,7 +2374,7 @@ pub struct ContractChangelogEntry {
     pub breaking_changes: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
 pub struct ContractChangelogResponse {
     pub contract_id: Uuid,
     pub entries: Vec<ContractChangelogEntry>,

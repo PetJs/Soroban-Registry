@@ -25,6 +25,13 @@ pub enum RealtimeEvent {
         details: serde_json::Value,
         timestamp: String,
     },
+    CicdPipeline {
+        contract_id: String,
+        status: String,
+        steps_completed: u32,
+        total_steps: u32,
+        timestamp: String,
+    },
 }
 
 /// Application state shared across handlers
@@ -48,7 +55,7 @@ impl AppState {
         registry: Registry,
         job_engine: Arc<soroban_batch::engine::JobEngine>,
         is_shutting_down: Arc<AtomicBool>,
-    ) -> Self {
+    ) -> Result<Self, crate::shared::error::RegistryError> {
         let config = CacheConfig::from_env();
         let auth_mgr = Arc::new(RwLock::new(
             AuthManager::from_env().expect("JWT config validated at startup"),

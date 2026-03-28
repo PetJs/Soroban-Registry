@@ -15,17 +15,15 @@ mod db_monitoring;
 
 mod activity_feed_handlers;
 mod activity_feed_routes;
+mod analytics_handlers;
 mod category_handlers;
 mod custom_metrics_handlers;
 mod dependency;
+mod dependency_handlers;
 mod deprecation_handlers;
 mod error;
 mod events;
 mod handlers;
-mod dependency_handlers;
-mod multisig_handlers;
-mod multisig_routes;
-mod models;
 mod health;
 pub mod health_monitor;
 #[cfg(test)]
@@ -33,9 +31,13 @@ mod health_tests;
 mod metrics;
 mod metrics_handler;
 mod migration_handlers;
+mod models;
+mod multisig_handlers;
+mod multisig_routes;
 mod onchain_verification;
 #[cfg(feature = "openapi")]
 mod openapi;
+mod org_handlers;
 mod performance_handlers;
 mod rate_limit;
 mod release_notes_handlers;
@@ -46,9 +48,9 @@ mod resource_tracking;
 mod routes;
 pub mod security_log;
 pub mod signing_handlers;
+mod similarity_handlers;
 mod simulation;
 mod simulation_handlers;
-mod similarity_handlers;
 mod state;
 mod type_safety;
 mod validation;
@@ -223,11 +225,21 @@ async fn main() -> Result<()> {
             Method::DELETE,
             Method::OPTIONS,
         ])
-        .allow_headers([header::CONTENT_TYPE, header::AUTHORIZATION]);
+        .allow_headers([
+            header::CONTENT_TYPE,
+            header::AUTHORIZATION,
+            crate::request_tracing::X_REQUEST_ID.clone(),
+            crate::request_tracing::X_CORRELATION_ID.clone(),
+        ])
+        .expose_headers([
+            crate::request_tracing::X_REQUEST_ID.clone(),
+            crate::request_tracing::X_CORRELATION_ID.clone(),
+        ]);
 
     // Build router
     let app = Router::new()
         .merge(routes::auth_routes())
+        .merge(routes::organization_routes())
         .merge(routes::contract_routes())
         .merge(routes::publisher_routes())
         .merge(routes::health_routes())
@@ -240,12 +252,12 @@ async fn main() -> Result<()> {
         .merge(routes::canary_routes())
         .merge(routes::ab_test_routes())
         .merge(routes::performance_routes())
+        .merge(multisig_routes::routes())
         .merge(routes::observability_routes())
         .merge(routes::websocket_routes())
         .merge(release_notes_routes::release_notes_routes())
         .nest("/api", activity_feed_routes::routes())
         .fallback(handlers::route_not_found)
-        .layer(middleware::from_fn(request_tracing::tracing_middleware))
         .layer(middleware::from_fn(
             validation::payload_size::payload_size_validation_middleware,
         ))
@@ -261,6 +273,7 @@ async fn main() -> Result<()> {
             rate_limit::rate_limit_middleware,
         ))
         .layer(cors)
+        .layer(middleware::from_fn(request_tracing::tracing_middleware))
         .with_state(state.clone());
 
     // Start server (port configurable via PORT env var, default 3001)
