@@ -124,6 +124,7 @@ mod tests {
     use super::*;
     use crate::auth::AuthManager;
     use crate::cache::{CacheConfig, CacheLayer};
+    use crate::contract_events::ContractEventHub;
     use crate::health_monitor::HealthMonitorStatus;
     use crate::resource_tracking::ResourceManager;
     use axum::extract::Query;
@@ -153,6 +154,7 @@ mod tests {
             health_monitor_status: HealthMonitorStatus::default(),
             auth_mgr,
             resource_mgr,
+            contract_events: Arc::new(ContractEventHub::from_env()),
         }
     }
 
