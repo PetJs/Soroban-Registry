@@ -39,6 +39,7 @@ mod onchain_verification;
 #[cfg(feature = "openapi")]
 mod openapi;
 mod org_handlers;
+mod patch_handlers;
 mod performance_handlers;
 mod rate_limit;
 mod release_notes_handlers;

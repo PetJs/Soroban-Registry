@@ -4,8 +4,8 @@ use crate::{
     ab_test_handlers, auth, auth_handlers, batch_verify_handlers, breaking_changes,
     canary_handlers, category_handlers, compatibility_testing_handlers, contract_events,
     contributor_handlers, custom_metrics_handlers, deprecation_handlers, handlers, metrics_handler,
-    migration_handlers, performance_handlers, resource_handlers, similarity_handlers,
-    simulation_handlers, state::AppState, websocket,
+    migration_handlers, patch_handlers, performance_handlers, resource_handlers,
+    similarity_handlers, simulation_handlers, state::AppState, websocket,
 };
 
 use axum::{
@@ -79,6 +79,23 @@ pub fn contract_routes() -> Router<AppState> {
         .route(
             "/api/contracts/:id/changelog",
             get(handlers::get_contract_changelog),
+        )
+        // Differential update pipeline (Issue #501)
+        .route(
+            "/api/contracts/:id/patches",
+            get(patch_handlers::list_contract_patches),
+        )
+        .route(
+            "/api/contracts/:id/patches/:from_version/:to_version",
+            get(patch_handlers::get_patch_between_versions),
+        )
+        .route(
+            "/api/contracts/:id/patches/reconstruct",
+            post(patch_handlers::reconstruct_contract_version),
+        )
+        .route(
+            "/api/contracts/patches/bulk-apply",
+            post(patch_handlers::bulk_apply_patches),
         )
         .route(
             "/api/contracts/:id/versions/:version/source",
