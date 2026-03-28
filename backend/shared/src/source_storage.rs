@@ -1,11 +1,16 @@
 use crate::error::RegistryError;
-use crate::models::SourceFormat;
 use sha2::{Digest, Sha256};
 use std::env;
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tokio::fs;
 use uuid::Uuid;
+
+#[derive(Debug, Clone)]
+pub enum SourceFormat {
+    Rust,
+    Wasm,
+}
 
 /// Supported source storage backends
 #[derive(Debug, Clone)]
@@ -90,13 +95,20 @@ impl SourceStorage {
                 .clone()
                 .ok_or_else(|| RegistryError::InvalidInput("SOURCE_STORAGE_BUCKET is required".to_string()))?;
 
-            let endpoint = config.s3_endpoint.clone();
-            let bucket = if let Some(ep) = endpoint {
-                s3::bucket::Bucket::new_with_path_style(&bucket, &region, &ep)?
+            let credentials = s3::creds::Credentials::default()
+                .map_err(|e| RegistryError::Internal(format!("S3 credentials error: {}", e)))?;
+            let s3_region = if let Some(ep) = config.s3_endpoint.clone() {
+                s3::Region::Custom { region: region.clone(), endpoint: ep }
             } else {
-                s3::bucket::Bucket::new(&bucket, &region)?
+                s3::Region::Custom {
+                    region: region.clone(),
+                    endpoint: format!("https://s3.{}.amazonaws.com", region),
+                }
             };
-            Some(bucket)
+            let b = s3::Bucket::new(&bucket, s3_region, credentials)
+                .map_err(|e| RegistryError::Internal(format!("S3 bucket init error: {}", e)))?
+                .with_path_style();
+            Some(*b)
         } else {
             None
         };
@@ -149,15 +161,11 @@ impl SourceStorage {
                     .unwrap_or_else(|| "contract_sources".to_string());
                 let object_key = format!("{}/{}", prefix.trim_end_matches('/'), key);
 
-                let result = bucket.put_object_blocking(&object_key, source_bytes);
-                if result.is_ok() {
-                    Ok((self.config.backend.to_string(), object_key, source_hash))
-                } else {
-                    Err(RegistryError::Internal(format!(
-                        "Failed to upload source artifact to S3/GCS: {:?}",
-                        result.err()
-                    )))
-                }
+                bucket.put_object(&object_key, source_bytes).await
+                    .map_err(|e| RegistryError::Internal(format!(
+                        "Failed to upload source artifact to S3/GCS: {}", e
+                    )))?;
+                Ok((self.config.backend.to_string(), object_key, source_hash))
             }
         }
     }
@@ -174,8 +182,9 @@ impl SourceStorage {
                     .as_ref()
                     .ok_or_else(|| RegistryError::Internal("S3/GCS bucket not initialized".to_string()))?;
 
-                let data = bucket.get_object_blocking(storage_key);
-                data.map_err(|e| RegistryError::Internal(format!("S3/GCS get_object failed: {}", e)))
+                let data = bucket.get_object(storage_key).await
+                    .map_err(|e| RegistryError::Internal(format!("S3/GCS get_object failed: {}", e)))?;
+                Ok(data.to_vec())
             }
             other => Err(RegistryError::InvalidInput(format!("Unknown storage backend {}", other))),
         }
