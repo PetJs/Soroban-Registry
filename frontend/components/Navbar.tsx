@@ -1,6 +1,6 @@
 'use client';
 
-import { Package, GitBranch, ChevronDown, BarChart2, Users, Menu, X, Layers, Search, Plus } from 'lucide-react';
+import { Package, GitBranch, ChevronDown, BarChart2, Users, Menu, X, Layers, Search, Plus, TrendingUp } from 'lucide-react';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { useState, useRef } from 'react';
@@ -17,7 +17,7 @@ export default function Navbar() {
     const setMobileMenuOpen = (open: boolean) => setMenuOpenForPath(open ? pathname : null);
 
     const isActive = (href: string) => pathname === href;
-    const isExploreActive = ['/publishers', '/stats', '/templates'].some(p => pathname.startsWith(p));
+    const isExploreActive = ['/publishers', '/stats', '/templates', '/analytics'].some(p => pathname.startsWith(p));
 
     const handleDropdownEnter = () => {
         if (dropdownTimeout.current) clearTimeout(dropdownTimeout.current);
@@ -115,6 +115,17 @@ export default function Navbar() {
                                             <Layers className="w-3.5 h-3.5 text-primary/70" />
                                             Templates
                                         </Link>
+                                        <Link
+                                            href="/analytics"
+                                            className={`flex items-center gap-2.5 px-3 py-2 text-[13px] transition-colors ${
+                                                isActive('/analytics')
+                                                    ? 'text-primary bg-primary/5'
+                                                    : 'text-muted-foreground hover:text-foreground hover:bg-accent'
+                                            }`}
+                                        >
+                                            <TrendingUp className="w-3.5 h-3.5 text-primary/70" />
+                                            Analytics
+                                        </Link>
                                     </div>
                                 </div>
                             </div>
@@ -167,6 +178,7 @@ export default function Navbar() {
                                 { href: '/publishers', label: 'Publishers', icon: Users },
                                 { href: '/stats', label: 'Statistics', icon: BarChart2 },
                                 { href: '/templates', label: 'Templates', icon: Layers },
+                                { href: '/analytics', label: 'Search Analytics', icon: TrendingUp },
                                 { href: '/graph', label: 'Dependency Graph', icon: GitBranch },
                             ].map(({ href, label, icon: Icon }) => (
                                 <Link
