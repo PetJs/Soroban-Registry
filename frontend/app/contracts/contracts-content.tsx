@@ -11,20 +11,29 @@ import { FilterPanel } from '@/components/contracts/FilterPanel';
 import { ResultsCount } from '@/components/contracts/ResultsCount';
 import { SortDropdown, SortBy } from '@/components/contracts/SortDropdown';
 import TagAutocomplete from '@/components/tags/TagAutocomplete';
-import { Filter, Package, SlidersHorizontal, X, Search, Sparkles, CheckCircle, Users, LayoutGrid, List } from 'lucide-react';
+import { Filter, Package, SlidersHorizontal, X, Search, Sparkles, CheckCircle, Users } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import { useAnalytics } from '@/hooks/useAnalytics';
 
 const DEFAULT_PAGE_SIZE = 12;
 const CATEGORY_OPTIONS = [
-  'DeFi',
-  'NFT',
-  'Governance',
-  'Infrastructure',
-  'Payment',
-  'Identity',
-  'Gaming',
-  'Social',
+  { value: 'defi', label: 'DeFi' },
+  { value: 'nft', label: 'NFT' },
+  { value: 'dao', label: 'DAO' },
+  { value: 'governance', label: 'Governance' },
+  { value: 'dex', label: 'DEX' },
+  { value: 'lending', label: 'Lending' },
+  { value: 'bridge', label: 'Bridge' },
+  { value: 'oracle', label: 'Oracle' },
+  { value: 'token', label: 'Token' },
+  { value: 'infrastructure', label: 'Infrastructure' },
+  { value: 'payment', label: 'Payment' },
+  { value: 'identity', label: 'Identity' },
+  { value: 'gaming', label: 'Gaming' },
+  { value: 'social', label: 'Social' },
+  { value: 'wallet', label: 'Wallet' },
+  { value: 'tooling', label: 'Tooling' },
+  { value: 'other', label: 'Other' },
 ];
 const LANGUAGE_OPTIONS = [
   'Rust',
@@ -102,6 +111,19 @@ function getPaginationRange(
   }
 
   return range;
+}
+
+function toCategoryLabel(value: string) {
+  const preset = CATEGORY_OPTIONS.find((option) => option.value === value.toLowerCase());
+  if (preset) return preset.label;
+
+  return value
+    .split(/[-_\s]+/)
+    .filter(Boolean)
+    .map((part) =>
+      part.length <= 3 ? part.toUpperCase() : part.charAt(0).toUpperCase() + part.slice(1),
+    )
+    .join(' ');
 }
 
 type ContractsUiFilters = {
@@ -205,16 +227,61 @@ export function ContractsContent() {
     placeholderData: (previousData) => previousData,
   });
 
+  const categoryCountParams = useMemo<ContractSearchParams>(
+    () => ({
+      query: debouncedQuery || undefined,
+      languages: filters.languages.length > 0 ? filters.languages : undefined,
+      tags: filters.tags.length > 0 ? filters.tags : undefined,
+      author: filters.author || undefined,
+      networks: filters.networks.length > 0 ? filters.networks : undefined,
+      verified_only: filters.verified_only,
+      sort_by: 'created_at',
+      sort_order: 'desc',
+      page: 1,
+      page_size: 1000,
+    }),
+    [debouncedQuery, filters.author, filters.languages, filters.networks, filters.tags, filters.verified_only],
+  );
+
+  const { data: categoryCountsSource } = useQuery({
+    queryKey: ['contracts-category-counts', categoryCountParams],
+    queryFn: () => api.getContracts(categoryCountParams),
+    placeholderData: (previousData) => previousData,
+  });
+
   const { data: stats } = useQuery({
     queryKey: ['stats'],
     queryFn: () => api.getStats(),
   });
 
-  const isEmptyResult = (data?.total ?? 0) === 0;
   const paginationRange = useMemo(
     () => (data ? getPaginationRange(filters.page, data.total_pages) : []),
     [filters.page, data],
   );
+  const categoryOptions = useMemo(() => {
+    const counts = new Map<string, number>();
+
+    (categoryCountsSource?.items ?? []).forEach((contract) => {
+      const category = contract.category?.trim().toLowerCase();
+      if (!category) return;
+      counts.set(category, (counts.get(category) ?? 0) + 1);
+    });
+
+    const discoveredValues = Array.from(counts.keys());
+    const selectedValues = filters.categories.map((category) => category.toLowerCase());
+    const knownValues = CATEGORY_OPTIONS.map((option) => option.value);
+
+    return Array.from(new Set([...knownValues, ...discoveredValues, ...selectedValues]))
+      .map((value) => ({
+        value,
+        label: toCategoryLabel(value),
+        count: counts.get(value) ?? 0,
+      }))
+      .sort((left, right) => {
+        if (right.count !== left.count) return right.count - left.count;
+        return left.label.localeCompare(right.label);
+      });
+  }, [categoryCountsSource?.items, filters.categories]);
 
   useEffect(() => {
     const payload = {
@@ -277,7 +344,7 @@ export function ContractsContent() {
     filters.categories.forEach((category) =>
       chips.push({
         id: `category:${category}`,
-        label: `Category: ${category}`,
+        label: `Category: ${toCategoryLabel(category)}`,
         onRemove: () =>
           setFilters((current) => ({
             ...current,
@@ -356,12 +423,19 @@ export function ContractsContent() {
 
   const filterPanel = (
     <FilterPanel
-      categories={CATEGORY_OPTIONS}
+      categories={categoryOptions}
       selectedCategories={filters.categories}
       onToggleCategory={(value) =>
         setFilters((current) => ({
           ...current,
-          categories: toggleOne(current.categories, value),
+          categories: toggleOne(current.categories, value.toLowerCase()),
+          page: 1,
+        }))
+      }
+      onClearCategories={() =>
+        setFilters((current) => ({
+          ...current,
+          categories: [],
           page: 1,
         }))
       }
