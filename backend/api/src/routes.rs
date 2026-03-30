@@ -638,3 +638,98 @@ pub fn websocket_routes() -> Router<AppState> {
         axum::routing::get(websocket::websocket_handler),
     )
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SECURITY SCANNING ROUTES (#498)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn security_scanning_routes() -> Router<AppState> {
+    Router::new()
+        // Security scanner management
+        .route(
+            "/api/security/scanners",
+            get(security_scan_handlers::list_security_scanners)
+                .post(security_scan_handlers::create_security_scanner),
+        )
+        // Contract security endpoints
+        .route(
+            "/api/contracts/:id/scans",
+            get(security_scan_handlers::list_security_scans)
+                .post(security_scan_handlers::trigger_security_scan),
+        )
+        .route(
+            "/api/contracts/:id/scans/:scan_id",
+            get(security_scan_handlers::get_security_scan),
+        )
+        .route(
+            "/api/contracts/:id/security",
+            get(security_scan_handlers::get_contract_security_summary),
+        )
+        .route(
+            "/api/contracts/:id/security/score-history",
+            get(security_scan_handlers::get_security_score_history),
+        )
+        .route(
+            "/api/contracts/:id/issues",
+            get(security_scan_handlers::list_security_issues),
+        )
+        .route(
+            "/api/contracts/:id/issues/:issue_id",
+            patch(security_scan_handlers::update_security_issue),
+        )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// SUBSCRIPTION & NOTIFICATION ROUTES (#493)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn subscription_routes() -> Router<AppState> {
+    Router::new()
+        // User subscriptions
+        .route(
+            "/api/me/subscriptions",
+            get(subscription_handlers::list_user_subscriptions),
+        )
+        .route(
+            "/api/contracts/:id/subscribe",
+            post(subscription_handlers::subscribe_to_contract)
+                .delete(subscription_handlers::unsubscribe_from_contract),
+        )
+        .route(
+            "/api/subscriptions/:id",
+            patch(subscription_handlers::update_subscription),
+        )
+        // Notification preferences
+        .route(
+            "/api/notifications/preferences",
+            get(subscription_handlers::get_notification_preferences)
+                .patch(subscription_handlers::update_notification_preferences),
+        )
+        // Notifications
+        .route(
+            "/api/notifications",
+            get(subscription_handlers::list_notifications),
+        )
+        .route(
+            "/api/notifications/:id/read",
+            post(subscription_handlers::mark_notification_read),
+        )
+        .route(
+            "/api/notifications/read-all",
+            post(subscription_handlers::mark_all_notifications_read),
+        )
+        .route(
+            "/api/notifications/statistics",
+            get(subscription_handlers::get_notification_statistics),
+        )
+        // Webhooks
+        .route(
+            "/api/webhooks",
+            get(subscription_handlers::list_webhooks)
+                .post(subscription_handlers::create_webhook),
+        )
+        .route(
+            "/api/webhooks/:id",
+            delete(subscription_handlers::delete_webhook),
+        )
+}
