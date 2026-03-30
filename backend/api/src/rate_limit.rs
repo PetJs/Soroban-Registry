@@ -185,8 +185,19 @@ impl RateLimitState {
             );
         }
 
+        let path = request.uri().path();
+        let query = request.uri().query();
+        let base_limit = self.config.anonymous_limit;
+        let limit = if let Some(page_size) =
+            contracts_page_size_rate_limit(request.method(), path, query)
+        {
+            scale_limit_by_page_size(base_limit, page_size)
+        } else {
+            base_limit
+        };
+
         (
-            self.config.anonymous_limit,
+            limit,
             BucketKey {
                 client_key: format!("anon:{}", extract_client_ip(request)),
             },
@@ -357,7 +368,6 @@ fn is_write_method(method: &Method) -> bool {
     )
 }
 
-#[allow(dead_code)]
 fn contracts_page_size_rate_limit(method: &Method, path: &str, query: Option<&str>) -> Option<u32> {
     if *method != Method::GET || path != "/api/contracts" {
         return None;
@@ -366,7 +376,6 @@ fn contracts_page_size_rate_limit(method: &Method, path: &str, query: Option<&st
     Some(extract_page_size(query).unwrap_or(DEFAULT_CONTRACTS_PAGE_SIZE))
 }
 
-#[allow(dead_code)]
 fn extract_page_size(query: Option<&str>) -> Option<u32> {
     let query = query?;
 
@@ -385,7 +394,6 @@ fn extract_page_size(query: Option<&str>) -> Option<u32> {
     None
 }
 
-#[allow(dead_code)]
 fn scale_limit_by_page_size(base_limit: u32, page_size: u32) -> u32 {
     let weight = page_size.div_ceil(DEFAULT_CONTRACTS_PAGE_SIZE).max(1);
     (base_limit / weight).max(1)
