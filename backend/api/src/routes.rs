@@ -7,7 +7,7 @@ use crate::{
     deprecation_handlers, handlers, interoperability_handlers, metrics_handler,
     migration_handlers, org_handlers, performance_handlers, resource_handlers,
     security_scan_handlers, similarity_handlers, simulation_handlers, state::AppState,
-    subscription_handlers, websocket,
+    subscription_handlers, websocket, zk_proof_handlers,
 };
 
 
@@ -758,5 +758,38 @@ pub fn subscription_routes() -> Router<AppState> {
         .route(
             "/api/webhooks/:id",
             delete(subscription_handlers::delete_webhook),
+        )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ZERO-KNOWLEDGE PROOF VALIDATION ROUTES (#624)
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn zk_proof_routes() -> Router<AppState> {
+    Router::new()
+        // ── Circuit management ─────────────────────────────────────────
+        .route(
+            "/api/contracts/:id/zk/circuits",
+            post(zk_proof_handlers::register_circuit)
+                .get(zk_proof_handlers::list_circuits),
+        )
+        .route(
+            "/api/contracts/:id/zk/circuits/:circuit_id",
+            get(zk_proof_handlers::get_circuit),
+        )
+        // ── Proof submission & validation ──────────────────────────────
+        .route(
+            "/api/contracts/:id/zk/proofs",
+            post(zk_proof_handlers::submit_proof)
+                .get(zk_proof_handlers::list_proofs),
+        )
+        .route(
+            "/api/contracts/:id/zk/proofs/:proof_id",
+            get(zk_proof_handlers::get_proof),
+        )
+        // ── Privacy-preserving analytics ───────────────────────────────
+        .route(
+            "/api/contracts/:id/zk/analytics",
+            get(zk_proof_handlers::get_zk_analytics),
         )
 }

@@ -3970,3 +3970,204 @@ pub struct NotificationStatistics {
     pub total_delivered: i32,
     pub total_failed: i32,
 }
+
+// ═══════════════════════════════════════════════════════════════════════════
+// ZERO-KNOWLEDGE PROOF VALIDATION SYSTEM (Issue #624)
+// ═══════════════════════════════════════════════════════════════════════════
+
+/// Supported ZK proof systems
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
+#[sqlx(type_name = "zk_proof_system", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum ZkProofSystem {
+    Groth16,
+    Plonk,
+    Stark,
+    Marlin,
+    Fflonk,
+}
+
+impl std::fmt::Display for ZkProofSystem {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ZkProofSystem::Groth16 => "groth16",
+            ZkProofSystem::Plonk   => "plonk",
+            ZkProofSystem::Stark   => "stark",
+            ZkProofSystem::Marlin  => "marlin",
+            ZkProofSystem::Fflonk  => "fflonk",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+/// Supported circuit languages / DSLs
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
+#[sqlx(type_name = "zk_circuit_language", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum ZkCircuitLanguage {
+    Circom,
+    Noir,
+    Leo,
+    Cairo,
+    Halo2,
+}
+
+/// ZK proof validation status
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::Type, utoipa::ToSchema, PartialEq)]
+#[sqlx(type_name = "zk_proof_status", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum ZkProofStatus {
+    Pending,
+    Valid,
+    Invalid,
+    Error,
+}
+
+impl std::fmt::Display for ZkProofStatus {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            ZkProofStatus::Pending => "pending",
+            ZkProofStatus::Valid   => "valid",
+            ZkProofStatus::Invalid => "invalid",
+            ZkProofStatus::Error   => "error",
+        };
+        write!(f, "{}", s)
+    }
+}
+
+/// A compiled ZK circuit registered for a contract
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct ZkCircuit {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub language: ZkCircuitLanguage,
+    pub proof_system: ZkProofSystem,
+    /// Circuit source code / program text
+    pub circuit_source: String,
+    /// SHA-256 hash of the compiled circuit artifact
+    pub circuit_hash: String,
+    /// Serialised verification key (base64)
+    pub verification_key: String,
+    pub num_public_inputs: i32,
+    pub num_constraints: Option<i64>,
+    pub metadata: Option<serde_json::Value>,
+    pub compiled_at: Option<DateTime<Utc>>,
+    pub created_by: Option<Uuid>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+/// Request body to register / compile a new circuit
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct RegisterCircuitRequest {
+    pub name: String,
+    pub description: Option<String>,
+    pub language: ZkCircuitLanguage,
+    pub proof_system: ZkProofSystem,
+    pub circuit_source: String,
+    /// Pre-computed verification key (base64)
+    pub verification_key: String,
+    pub num_public_inputs: i32,
+    pub num_constraints: Option<i64>,
+    pub metadata: Option<serde_json::Value>,
+    pub created_by_address: Option<String>,
+}
+
+/// A ZK proof submitted for validation
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct ZkProofSubmission {
+    pub id: Uuid,
+    pub circuit_id: Uuid,
+    pub contract_id: Uuid,
+    pub proof_data: String,
+    pub public_inputs: serde_json::Value,
+    pub status: ZkProofStatus,
+    pub prover_address: String,
+    pub purpose: Option<String>,
+    pub error_message: Option<String>,
+    pub verification_ms: Option<i64>,
+    pub verified_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}
+
+/// Request body to submit a ZK proof for validation
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct SubmitProofRequest {
+    pub circuit_id: Uuid,
+    pub proof_data: String,
+    pub public_inputs: Vec<String>,
+    pub prover_address: String,
+    pub purpose: Option<String>,
+}
+
+/// Result returned after proof validation
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ZkProofValidationResult {
+    pub proof_id: Uuid,
+    pub circuit_id: Uuid,
+    pub contract_id: Uuid,
+    pub status: ZkProofStatus,
+    pub valid: bool,
+    pub message: String,
+    pub verification_ms: Option<i64>,
+    pub verified_at: Option<DateTime<Utc>>,
+}
+
+/// Privacy-preserving aggregate analytics for a contract's ZK proof activity
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow, utoipa::ToSchema)]
+pub struct ZkAnalyticsAggregate {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub circuit_id: Option<Uuid>,
+    pub bucket_hour: DateTime<Utc>,
+    pub proof_system: ZkProofSystem,
+    pub total_proofs: i64,
+    pub valid_proofs: i64,
+    pub invalid_proofs: i64,
+    pub error_proofs: i64,
+    pub avg_verify_ms: Option<rust_decimal::Decimal>,
+    pub p99_verify_ms: Option<rust_decimal::Decimal>,
+}
+
+/// Aggregated ZK analytics response (no individual prover data exposed)
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ZkAnalyticsSummary {
+    pub contract_id: Uuid,
+    pub total_proofs: i64,
+    pub valid_proofs: i64,
+    pub invalid_proofs: i64,
+    pub error_proofs: i64,
+    pub success_rate_pct: f64,
+    pub avg_verify_ms: Option<f64>,
+    pub circuits: Vec<ZkCircuitStats>,
+}
+
+/// Per-circuit statistics within the analytics summary
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ZkCircuitStats {
+    pub circuit_id: Uuid,
+    pub circuit_name: String,
+    pub proof_system: ZkProofSystem,
+    pub total_proofs: i64,
+    pub valid_proofs: i64,
+    pub success_rate_pct: f64,
+    pub avg_verify_ms: Option<f64>,
+}
+
+/// Circuit summary (safe to expose publicly — omits circuit_source & verification_key)
+#[derive(Debug, Clone, Serialize, Deserialize, utoipa::ToSchema)]
+pub struct ZkCircuitSummary {
+    pub id: Uuid,
+    pub contract_id: Uuid,
+    pub name: String,
+    pub description: Option<String>,
+    pub language: ZkCircuitLanguage,
+    pub proof_system: ZkProofSystem,
+    pub circuit_hash: String,
+    pub num_public_inputs: i32,
+    pub num_constraints: Option<i64>,
+    pub compiled_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+}

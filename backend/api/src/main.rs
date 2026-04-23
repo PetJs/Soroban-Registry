@@ -64,6 +64,7 @@ mod state;
 mod type_safety;
 mod validation;
 mod websocket;
+mod zk_proof_handlers;
 
 use anyhow::Result;
 use axum::extract::{Request, State};
@@ -273,6 +274,7 @@ async fn main() -> Result<()> {
         .merge(routes::websocket_routes())
         .merge(routes::validator_routes())
         .merge(release_notes_routes::release_notes_routes())
+        .merge(routes::zk_proof_routes())
         .route("/api/graphql", axum::routing::post(graphql::graphql_handler).with_state(schema))
         .route("/api/graphql/playground", axum::routing::get(graphql::graphql_playground))
         .nest("/api", activity_feed_routes::routes())
