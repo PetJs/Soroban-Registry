@@ -4,8 +4,8 @@ use crate::{
     ab_test_handlers, analytics_handlers, auth, auth_handlers, batch_verify_handlers,
     breaking_changes, canary_handlers, category_handlers, clone_federation_handlers,
     compatibility_testing_handlers, contract_events, custom_metrics_handlers,
-    deprecation_handlers, handlers, interoperability_handlers, metrics_handler,
-    migration_handlers, org_handlers, performance_handlers, resource_handlers,
+    deprecation_handlers, formal_verification_handlers, handlers, interoperability_handlers,
+    metrics_handler, migration_handlers, org_handlers, performance_handlers, resource_handlers,
     security_scan_handlers, similarity_handlers, simulation_handlers, state::AppState,
     subscription_handlers, websocket,
 };
@@ -765,5 +765,22 @@ pub fn subscription_routes() -> Router<AppState> {
         .route(
             "/api/webhook-deliveries/:id/retry",
             post(subscription_handlers::retry_webhook_delivery),
+        )
+}
+
+// ═══════════════════════════════════════════════════════════════════════════
+// FORMAL VERIFICATION ROUTES
+// ═══════════════════════════════════════════════════════════════════════════
+
+pub fn formal_verification_routes() -> Router<AppState> {
+    Router::new()
+        .route(
+            "/api/contracts/:id/formal-verification",
+            post(formal_verification_handlers::trigger_formal_verification)
+                .get(formal_verification_handlers::list_formal_verification_sessions),
+        )
+        .route(
+            "/api/contracts/:id/formal-verification/:session_id",
+            get(formal_verification_handlers::get_formal_verification_session),
         )
 }
